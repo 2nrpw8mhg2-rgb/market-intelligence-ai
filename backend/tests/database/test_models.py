@@ -5,6 +5,7 @@ from app.models import (  # noqa: F401
     Feature,
     MarketBarRecord,
     Opportunity,
+    Security,
     Strategy,
     Symbol,
     Universe,
@@ -15,6 +16,7 @@ from app.models import (  # noqa: F401
 def test_initial_schema_contains_expected_tables() -> None:
     assert set(Base.metadata.tables) == {
         "symbols",
+        "securities",
         "market_bars",
         "features",
         "opportunities",

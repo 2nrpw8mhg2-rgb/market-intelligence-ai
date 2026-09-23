@@ -2,7 +2,7 @@
 
 Plataforma de investigação quantitativa para analisar dados históricos do mercado acionista norte-americano, testar hipóteses e identificar condições mensuráveis. O projeto não produz aconselhamento financeiro nem executa ordens.
 
-A Fase 2 contém a fundação técnica, persistência OHLCV idempotente, universos point-in-time, Feature Engine determinístico e um endpoint de desenvolvimento para consultar features armazenadas. Scanner, ranking, backtesting, ML e trading ainda não estão implementados.
+A Fase 3 contém a fundação técnica, persistência OHLCV idempotente, universos point-in-time, calendário oficial XNYS, validação de completude por sessão, Feature Engine determinístico e um endpoint de desenvolvimento para consultar features armazenadas. Scanner, ranking, backtesting, ML e trading ainda não estão implementados.
 
 ## Arquitetura
 
@@ -117,7 +117,7 @@ pytest --cov=app --cov-report=term-missing
 {
   "status": "ok",
   "service": "market-intelligence-api",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "environment": "development"
 }
 ```
@@ -143,7 +143,7 @@ curl 'http://localhost:8000/api/v1/features/AAPL?start_date=2024-01-01&end_date=
 - erros tipados para autenticação, rate limit e payload inválido;
 - validação Pydantic e logging sem credenciais.
 
-`MarketDataService` coordena provider, validação, normalização UTC e persistência. Intervalos completamente cobertos pela cache não chamam novamente o provider. A persistência usa `ON CONFLICT DO UPDATE`; reprocessar a mesma barra atualiza os valores e não cria duplicados.
+`MarketDataService` coordena provider, calendário XNYS, validação, normalização UTC e persistência. A completude é calculada pelas sessões reais da bolsa: fins de semana e feriados não são lacunas, enquanto sessões ausentes são pedidas ao provider em intervalos mínimos. A persistência usa `ON CONFLICT DO UPDATE`; reprocessar a mesma barra atualiza os valores e não cria duplicados.
 
 ## Base de dados
 
@@ -158,12 +158,15 @@ As duas migrações criam:
 - `backtest_trades`
 - `universes`
 - `universe_memberships`
+- `securities`
 
-A identidade de uma barra é `ticker + timestamp + timeframe + provider`, materializada através de `symbol_id` e de uma constraint única PostgreSQL. Os universos guardam `valid_from`, `valid_to` e `source`, permitindo consultas point-in-time. Valores monetários usam `NUMERIC`; timestamps são timezone-aware.
+A identidade de uma barra é `ticker + timestamp + timeframe + provider`, materializada através de `symbol_id` e de uma constraint única PostgreSQL. Os universos guardam `valid_from`, `valid_to`, `source` e `loaded_at`, permitindo consultas point-in-time. `securities` fornece uma identidade estável opcional separada do ticker. Valores monetários usam `NUMERIC`; timestamps são timezone-aware.
 
 ## Feature Engine
 
 O motor recebe OHLCV cronológico e devolve o mesmo `DataFrame` com SMA 20/50/200, EMA 20, RSI 14, MACD, ATR 14, retornos, volume relativo, máximos/mínimos anteriores, volatilidade e momentum. As fórmulas, warm-ups e políticas de qualidade estão em [backend/docs/FEATURES.md](backend/docs/FEATURES.md).
+
+Premissas de dados, calendário, S&P 500, corporate actions e alterações de ticker estão em [backend/docs/MARKET_DATA.md](backend/docs/MARKET_DATA.md).
 
 Máximos e mínimos anteriores usam sempre `shift(1)` antes da janela. A sessão atual nunca entra no limiar contra o qual é comparada.
 
@@ -181,9 +184,10 @@ npm run dev
 - Não existe scanner, ranking, backtesting, ML ou trading.
 - Ainda não existe endpoint público de ingestão; a ingestão é um serviço interno para que autenticação e limites operacionais sejam definidos antes da exposição HTTP.
 - A disponibilidade e profundidade histórica dependem do plano Massive.
-- O schema suporta composição point-in-time do S&P 500, mas é necessário carregar uma fonte histórica. Um snapshot atual isolado continua sujeito a survivorship bias quando aplicado ao passado.
-- Nenhuma barra deve ser tratada como concluída antes do fecho oficial da sessão; a política de sessões/calendário será definida antes do scanner.
+- O schema e importador suportam composição point-in-time do S&P 500, mas nenhuma fonte histórica é fabricada ou distribuída. É necessário carregar uma fonte autorizada.
+- XNYS identifica sessões de mercado, mas não explica suspensões, halts ou períodos fora da vida de uma security.
+- As barras Massive atuais são ajustadas para splits, mas não para dividendos.
 
 ## Próxima fase recomendada
 
-Após aprovação da Fase 2: adicionar calendário de sessões e carregamento operacional do universo S&P 500, depois implementar o scanner `BREAKOUT_20D_VOLUME` sobre estas features, com configuração versionada e testes de look-ahead. Backtesting só deve avançar após validação do scanner.
+Após aprovação da Fase 3: selecionar/carregar uma fonte histórica autorizada do S&P 500 e definir políticas para gaps específicos de cada security. Só depois implementar o scanner `BREAKOUT_20D_VOLUME`, com configuração versionada e testes de look-ahead. Backtesting continua fora desta fase.

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import MarketBarRecord, Symbol, Universe, UniverseMembership
 from app.schemas.market_data import MarketBar
+from app.schemas.universe import MembershipImportRecord
 
 
 class MarketBarStore(Protocol):
@@ -143,3 +144,81 @@ class UniverseRepository:
             .order_by(Symbol.ticker)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def list_membership_records(
+        self, universe_name: str, tickers: set[str]
+    ) -> list[MembershipImportRecord]:
+        if not tickers:
+            return []
+        statement = (
+            select(
+                Symbol.ticker,
+                UniverseMembership.valid_from,
+                UniverseMembership.valid_to,
+                UniverseMembership.source,
+            )
+            .join(UniverseMembership, UniverseMembership.symbol_id == Symbol.id)
+            .join(Universe, Universe.id == UniverseMembership.universe_id)
+            .where(Universe.name == universe_name)
+            .where(Symbol.ticker.in_(tickers))
+        )
+        return [
+            MembershipImportRecord(
+                ticker=row.ticker,
+                valid_from=row.valid_from,
+                valid_to=row.valid_to,
+                source=row.source,
+            )
+            for row in (await self._session.execute(statement)).all()
+        ]
+
+    async def upsert_memberships(
+        self, universe_name: str, records: list[MembershipImportRecord]
+    ) -> int:
+        if not records:
+            return 0
+        await self._session.execute(
+            insert(Universe)
+            .values(name=universe_name, description=f"{universe_name} point-in-time membership")
+            .on_conflict_do_nothing(index_elements=[Universe.name])
+        )
+        universe_id = await self._session.scalar(
+            select(Universe.id).where(Universe.name == universe_name)
+        )
+        if universe_id is None:
+            raise RuntimeError(f"could not resolve universe {universe_name}")
+        tickers = sorted({record.ticker for record in records})
+        await self._session.execute(
+            insert(Symbol)
+            .values(
+                [
+                    {"ticker": ticker, "asset_type": "stock", "metadata_json": {}}
+                    for ticker in tickers
+                ]
+            )
+            .on_conflict_do_nothing(index_elements=[Symbol.ticker])
+        )
+        symbol_rows = (
+            await self._session.execute(
+                select(Symbol.ticker, Symbol.id).where(Symbol.ticker.in_(tickers))
+            )
+        ).all()
+        symbol_ids = {row.ticker: row.id for row in symbol_rows}
+        values = [
+            {
+                "universe_id": universe_id,
+                "symbol_id": symbol_ids[record.ticker],
+                "valid_from": record.valid_from,
+                "valid_to": record.valid_to,
+                "source": record.source,
+            }
+            for record in records
+        ]
+        statement = insert(UniverseMembership).values(values)
+        statement = statement.on_conflict_do_update(
+            constraint="uq_universe_membership_identity",
+            set_={"valid_to": statement.excluded.valid_to, "loaded_at": func.now()},
+        )
+        result = await self._session.execute(statement)
+        await self._session.commit()
+        return result.rowcount or 0

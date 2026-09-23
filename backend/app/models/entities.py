@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Date, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Date, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,11 +14,24 @@ class Symbol(TimestampMixin, Base):
     __tablename__ = "symbols"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    security_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("securities.id"), index=True
+    )
     ticker: Mapped[str] = mapped_column(String(16), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(String(255))
     exchange: Mapped[str | None] = mapped_column(String(32))
     asset_type: Mapped[str] = mapped_column(String(32), default="stock")
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class Security(TimestampMixin, Base):
+    __tablename__ = "securities"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str | None] = mapped_column(String(255))
+    cik: Mapped[str | None] = mapped_column(String(16), unique=True)
 
 
 class MarketBarRecord(TimestampMixin, Base):
@@ -78,6 +91,9 @@ class UniverseMembership(TimestampMixin, Base):
     valid_from: Mapped[date] = mapped_column(Date)
     valid_to: Mapped[date | None] = mapped_column(Date)
     source: Mapped[str] = mapped_column(String(255))
+    loaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class Feature(TimestampMixin, Base):

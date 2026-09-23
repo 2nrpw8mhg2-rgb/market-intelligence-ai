@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "market-intelligence-api"
-version = "0.2.0"
+version = "0.3.0"
 description = "Quantitative market intelligence backend"
 requires-python = ">=3.12"
 dependencies = [
   "alembic>=1.14,<2",
   "asyncpg>=0.30,<1",
   "fastapi>=0.115,<1",
+  "exchange-calendars>=4.11,<5",
   "httpx>=0.28,<1",
   "numpy>=2.2,<3",
   "pandas>=2.2,<4",

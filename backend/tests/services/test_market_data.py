@@ -31,6 +31,26 @@ class FakeProvider(MarketDataProvider):
         return self.bars
 
 
+class FakeCalendar:
+    name = "TEST"
+
+    def is_trading_day(self, value):
+        return value in {date(2024, 1, 1), date(2024, 1, 2)}
+
+    def previous_trading_day(self, value):
+        raise NotImplementedError
+
+    def next_trading_day(self, value):
+        raise NotImplementedError
+
+    def trading_days_between(self, start_date, end_date):
+        return [
+            value
+            for value in (date(2024, 1, 1), date(2024, 1, 2))
+            if start_date <= value <= end_date
+        ]
+
+
 class InMemoryStore:
     def __init__(self) -> None:
         self.values: dict[tuple[str, object, str], MarketBar] = {}
@@ -53,7 +73,7 @@ class InMemoryStore:
 async def test_ingestion_is_idempotent_and_avoids_second_provider_call() -> None:
     provider = FakeProvider([bar(1), bar(2)])
     store = InMemoryStore()
-    service = MarketDataService(provider, store)
+    service = MarketDataService(provider, store, FakeCalendar())
 
     first = await service.get_or_ingest_daily_bars("aapl", date(2024, 1, 1), date(2024, 1, 2))
     second = await service.get_or_ingest_daily_bars("AAPL", date(2024, 1, 1), date(2024, 1, 2))
@@ -65,7 +85,9 @@ async def test_ingestion_is_idempotent_and_avoids_second_provider_call() -> None
 
 @pytest.mark.asyncio
 async def test_provider_duplicates_are_rejected() -> None:
-    service = MarketDataService(FakeProvider([bar(1), bar(1)]), InMemoryStore())
+    service = MarketDataService(
+        FakeProvider([bar(1), bar(1)]), InMemoryStore(), FakeCalendar()
+    )
 
     with pytest.raises(ValueError, match="duplicate timestamps"):
         await service.get_or_ingest_daily_bars("AAPL", date(2024, 1, 1), date(2024, 1, 2))
@@ -73,7 +95,9 @@ async def test_provider_duplicates_are_rejected() -> None:
 
 @pytest.mark.asyncio
 async def test_provider_out_of_order_data_is_rejected() -> None:
-    service = MarketDataService(FakeProvider([bar(2), bar(1)]), InMemoryStore())
+    service = MarketDataService(
+        FakeProvider([bar(2), bar(1)]), InMemoryStore(), FakeCalendar()
+    )
 
     with pytest.raises(ValueError, match="chronological order"):
         await service.get_or_ingest_daily_bars("AAPL", date(2024, 1, 1), date(2024, 1, 2))
@@ -81,7 +105,9 @@ async def test_provider_out_of_order_data_is_rejected() -> None:
 
 @pytest.mark.asyncio
 async def test_provider_cannot_return_different_ticker() -> None:
-    service = MarketDataService(FakeProvider([bar(1, ticker="MSFT")]), InMemoryStore())
+    service = MarketDataService(
+        FakeProvider([bar(1, ticker="MSFT")]), InMemoryStore(), FakeCalendar()
+    )
 
     with pytest.raises(ValueError, match="unexpected ticker"):
         await service.get_or_ingest_daily_bars("AAPL", date(2024, 1, 1), date(2024, 1, 2))
