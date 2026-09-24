@@ -33,6 +33,12 @@ def test_initial_schema_contains_expected_tables() -> None:
         "universe_memberships",
         "universe_snapshots",
         "universe_snapshot_members",
+        "research_runs",
+        "market_regime_observations",
+        "portfolio_simulation_runs",
+        "portfolio_trades",
+        "portfolio_daily_equity",
+        "portfolio_skipped_signals",
     }
 
 

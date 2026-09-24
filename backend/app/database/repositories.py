@@ -8,14 +8,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     BacktestEvent, BacktestForwardReturn, BacktestRun, MarketBarRecord,
-    Opportunity, Strategy, Symbol, Universe, UniverseMembership,
+    MarketRegimeObservation, Opportunity, PortfolioDailyEquity,
+    PortfolioSimulationRun, PortfolioSkippedSignal, PortfolioTradeRecord,
+    ResearchRun, Strategy, Symbol, Universe, UniverseMembership,
     UniverseSnapshot, UniverseSnapshotMember,
 )
 from app.schemas.backtesting import BacktestRunResult
 from app.schemas.market_data import MarketBar
+from app.schemas.research import PortfolioSimulationResult, ResearchResult
 from app.schemas.scanner import OpportunityResult
 from app.schemas.universe import MembershipImportRecord
 from app.schemas.universe import CurrentSnapshotImport
+
+
+def _chunks(values: list[dict], size: int = 1_000):
+    for index in range(0, len(values), size):
+        yield values[index:index + size]
 
 
 class MarketBarStore(Protocol):
@@ -436,4 +444,105 @@ class BacktestRepository:
     async def list(self, limit: int = 100, offset: int = 0) -> list[dict]:
         statement = (select(BacktestRun.metadata_json)
                      .order_by(BacktestRun.created_at.desc()).limit(limit).offset(offset))
+        return list((await self._session.scalars(statement)).all())
+
+
+class ResearchRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def save(self, result: ResearchResult, configuration: dict) -> None:
+        run_id = uuid.UUID(result.run_id)
+        values = {
+            "id": run_id, "source_backtest_run_id": uuid.UUID(result.source_backtest_run_id),
+            "research_type": result.research_type, "config_hash": result.config_hash,
+            "event_count": result.event_count, "configuration": configuration,
+            "strategy_version": result.strategy_version, "universe_mode": result.universe_mode,
+            "start_date": result.start_date, "end_date": result.end_date,
+            "results": result.model_dump(mode="json"),
+        }
+        await self._session.execute(insert(ResearchRun).values(**values).on_conflict_do_update(
+            constraint="uq_research_run_config_hash",
+            set_={key: value for key, value in values.items() if key not in {"id", "config_hash"}},
+        ))
+        await self._session.execute(sa_delete(MarketRegimeObservation).where(MarketRegimeObservation.research_run_id == run_id))
+        observations = result.results.get("observations", [])
+        if observations:
+            tickers = {row["ticker"] for row in observations}
+            symbol_rows = (await self._session.execute(select(Symbol.ticker, Symbol.id).where(Symbol.ticker.in_(tickers)))).all()
+            symbol_ids = {row.ticker: row.id for row in symbol_rows}
+            values = [{
+                "research_run_id": run_id, "symbol_id": symbol_ids[row["ticker"]],
+                "signal_date": date.fromisoformat(row["signal_date"]),
+                "sma200_regime": row["sma200_regime"], "sma50_regime": row["sma50_regime"],
+                "configuration": row["configuration"], "volatility_regime": row["volatility_regime"],
+                "realized_volatility": row["realized_volatility"],
+            } for row in observations]
+            for batch in _chunks(values):
+                await self._session.execute(insert(MarketRegimeObservation).values(batch))
+        await self._session.commit()
+
+    async def get(self, run_id: uuid.UUID) -> dict | None:
+        return await self._session.scalar(select(ResearchRun.results).where(ResearchRun.id == run_id))
+
+    async def list(self, limit: int = 100, offset: int = 0) -> list[dict]:
+        statement = select(ResearchRun.results).order_by(ResearchRun.created_at.desc()).limit(limit).offset(offset)
+        return list((await self._session.scalars(statement)).all())
+
+
+class PortfolioRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def save(self, result: PortfolioSimulationResult) -> None:
+        run_id = uuid.UUID(result.run_id)
+        document = result.model_dump(mode="json")
+        values = {
+            "id": run_id, "source_backtest_run_id": uuid.UUID(result.source_backtest_run_id),
+            "config_hash": result.config_hash, "strategy_version": result.strategy_version,
+            "universe_mode": result.universe_mode,
+            "start_date": result.start_date, "end_date": result.end_date,
+            "configuration": result.configuration, "metrics": result.metrics,
+            "benchmark_metrics": result.benchmark_metrics, "metadata_json": document,
+        }
+        await self._session.execute(insert(PortfolioSimulationRun).values(**values).on_conflict_do_update(
+            constraint="uq_portfolio_simulation_config_hash",
+            set_={key: value for key, value in values.items() if key not in {"id", "config_hash"}},
+        ))
+        for model in (PortfolioTradeRecord, PortfolioDailyEquity, PortfolioSkippedSignal):
+            await self._session.execute(sa_delete(model).where(model.portfolio_run_id == run_id))
+        tickers = {item.ticker for item in result.trades} | {item.ticker for item in result.skipped_signals}
+        symbol_rows = (await self._session.execute(select(Symbol.ticker, Symbol.id).where(Symbol.ticker.in_(tickers)))).all() if tickers else []
+        symbol_ids = {row.ticker: row.id for row in symbol_rows}
+        if result.trades:
+            values = [{
+                "portfolio_run_id": run_id, "symbol_id": symbol_ids[item.ticker],
+                "signal_date": item.signal_date, "entry_date": item.entry_date,
+                "exit_date": item.exit_date, "score": item.score,
+                "details": item.model_dump(mode="json"),
+            } for item in result.trades]
+            for batch in _chunks(values):
+                await self._session.execute(insert(PortfolioTradeRecord).values(batch))
+        if result.daily_equity:
+            values = [{
+                "portfolio_run_id": run_id, "session_date": item.session_date,
+                "details": item.model_dump(mode="json"),
+            } for item in result.daily_equity]
+            for batch in _chunks(values):
+                await self._session.execute(insert(PortfolioDailyEquity).values(batch))
+        if result.skipped_signals:
+            values = [{
+                "portfolio_run_id": run_id, "symbol_id": symbol_ids[item.ticker],
+                "signal_date": item.signal_date, "reason": item.reason,
+                "details": item.model_dump(mode="json"),
+            } for item in result.skipped_signals]
+            for batch in _chunks(values):
+                await self._session.execute(insert(PortfolioSkippedSignal).values(batch))
+        await self._session.commit()
+
+    async def get(self, run_id: uuid.UUID) -> dict | None:
+        return await self._session.scalar(select(PortfolioSimulationRun.metadata_json).where(PortfolioSimulationRun.id == run_id))
+
+    async def list(self, limit: int = 100, offset: int = 0) -> list[dict]:
+        statement = select(PortfolioSimulationRun.metadata_json).order_by(PortfolioSimulationRun.created_at.desc()).limit(limit).offset(offset)
         return list((await self._session.scalars(statement)).all())

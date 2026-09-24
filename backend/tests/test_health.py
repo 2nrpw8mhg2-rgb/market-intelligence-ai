@@ -13,7 +13,7 @@ def test_health_returns_service_metadata(monkeypatch) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "market-intelligence-api",
-        "version": "0.6.0",
+        "version": "0.7.0",
         "environment": "test",
     }
 

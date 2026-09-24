@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from app import __version__
 from app.api.errors import install_exception_handlers
-from app.api.routes import backtests, features, health, scanner
+from app.api.routes import backtests, features, health, research, scanner
 from app.core.logging import configure_logging, get_logger
 
 
@@ -30,6 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(features.router)
     app.include_router(scanner.router)
     app.include_router(backtests.router)
+    app.include_router(research.router)
     return app
 
 

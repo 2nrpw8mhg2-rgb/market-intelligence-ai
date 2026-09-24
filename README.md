@@ -119,7 +119,7 @@ pytest --cov=app --cov-report=term-missing
 {
   "status": "ok",
   "service": "market-intelligence-api",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "environment": "development"
 }
 ```
@@ -158,6 +158,12 @@ As migrações criam:
 - `strategies`
 - `backtest_runs`
 - `backtest_trades`
+- `research_runs`
+- `market_regime_observations`
+- `portfolio_simulation_runs`
+- `portfolio_trades`
+- `portfolio_daily_equity`
+- `portfolio_skipped_signals`
 - `universes`
 - `universe_memberships`
 - `universe_snapshots`
@@ -175,6 +181,8 @@ Premissas de dados, calendário, S&P 500, corporate actions e alterações de ti
 A estratégia, filtros, score e API do scanner estão documentados em [backend/docs/SCANNER.md](backend/docs/SCANNER.md).
 
 O motor, modelos de entrada, universos, estatísticas e limitações do backtesting estão documentados em [backend/docs/BACKTESTING.md](backend/docs/BACKTESTING.md).
+
+A investigação de score/regimes e o simulador de carteira Long estão documentados em [backend/docs/RESEARCH_AND_PORTFOLIO.md](backend/docs/RESEARCH_AND_PORTFOLIO.md).
 
 O procedimento completo para importar o universo atual, ingerir dados, diagnosticar lacunas e executar scans está em [backend/docs/OPERATIONS.md](backend/docs/OPERATIONS.md).
 
@@ -201,7 +209,7 @@ npm run dev
 
 ## Limitações atuais
 
-- Não existe ML, portfolio construction, execução de ordens ou trading.
+- Não existe ML, execução de ordens, trading automático ou estratégias Short. A carteira é apenas uma simulação histórica Long.
 - A ingestão é deliberadamente uma CLI administrativa, não um endpoint público.
 - A disponibilidade e profundidade histórica dependem do plano Massive.
 - O schema e importador suportam composição point-in-time do S&P 500, mas nenhuma fonte histórica é fabricada ou distribuída. É necessário carregar uma fonte autorizada.
