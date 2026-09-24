@@ -2,7 +2,7 @@
 
 Plataforma de investigação quantitativa para analisar dados históricos do mercado acionista norte-americano, testar hipóteses e identificar condições mensuráveis. O projeto não produz aconselhamento financeiro nem executa ordens.
 
-A Fase 4.5 operacionaliza o scanner determinístico `BREAKOUT_20D_VOLUME`: snapshots atuais separados do histórico point-in-time, ingestão incremental Massive, diagnóstico de completude, sessão `LATEST` consciente do fecho e explicações auditáveis. Backtesting, ML e trading ainda não estão implementados.
+A Fase 5 acrescenta um motor de backtesting/event study determinístico ao scanner `BREAKOUT_20D_VOLUME`, com proteção contra look-ahead, retornos futuros por sessões XNYS, benchmark SPY, MFE/MAE e resultados persistidos e auditáveis. ML e trading não estão implementados.
 
 ## Arquitetura
 
@@ -19,12 +19,12 @@ O repositório é um monorepo simples para manter o frontend Lovable separado do
 │   │   ├── models/              # modelos persistentes
 │   │   ├── schemas/             # contratos Pydantic
 │   │   ├── market_data/         # interface e provider Massive
-│   │   ├── services/            # futura orquestração de casos de uso
+│   │   ├── services/            # orquestração de casos de uso
 │   │   ├── features/            # motor vetorizado de features
-│   │   ├── patterns/            # fronteira reservada
-│   │   ├── strategies/          # fronteira reservada
-│   │   ├── backtesting/         # fronteira reservada
-│   │   ├── ranking/             # fronteira reservada
+│   │   ├── patterns/            # padrões determinísticos
+│   │   ├── strategies/          # critérios de estratégia
+│   │   ├── backtesting/         # event study causal e estatística
+│   │   ├── ranking/             # score quantitativo
 │   │   ├── risk/                # fronteira reservada
 │   │   └── ml/                  # fronteira reservada; sem ML nesta fase
 │   ├── alembic/                 # migrações PostgreSQL
@@ -119,7 +119,7 @@ pytest --cov=app --cov-report=term-missing
 {
   "status": "ok",
   "service": "market-intelligence-api",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "environment": "development"
 }
 ```
@@ -174,6 +174,8 @@ Premissas de dados, calendário, S&P 500, corporate actions e alterações de ti
 
 A estratégia, filtros, score e API do scanner estão documentados em [backend/docs/SCANNER.md](backend/docs/SCANNER.md).
 
+O motor, modelos de entrada, universos, estatísticas e limitações do backtesting estão documentados em [backend/docs/BACKTESTING.md](backend/docs/BACKTESTING.md).
+
 O procedimento completo para importar o universo atual, ingerir dados, diagnosticar lacunas e executar scans está em [backend/docs/OPERATIONS.md](backend/docs/OPERATIONS.md).
 
 ## Scanner
@@ -199,13 +201,11 @@ npm run dev
 
 ## Limitações atuais
 
-- Não existe backtesting, ML ou trading.
+- Não existe ML, portfolio construction, execução de ordens ou trading.
 - A ingestão é deliberadamente uma CLI administrativa, não um endpoint público.
 - A disponibilidade e profundidade histórica dependem do plano Massive.
 - O schema e importador suportam composição point-in-time do S&P 500, mas nenhuma fonte histórica é fabricada ou distribuída. É necessário carregar uma fonte autorizada.
 - XNYS identifica sessões de mercado, mas não explica suspensões, halts ou períodos fora da vida de uma security.
 - As barras Massive atuais são ajustadas para splits, mas não para dividendos.
 
-## Próxima fase recomendada
-
-Após configurar base de dados, chave Massive e uma fonte identificada para o snapshot, executar a checklist operacional da Fase 4.5. Só depois avançar para a Fase 5 de backtesting, sem reutilizar informação futura.
+Backtests point-in-time exigem memberships históricos documentados. Sem essa cobertura, use apenas `FIXED_UNIVERSE_RESEARCH`, que inclui sempre o aviso explícito de survivorship bias.

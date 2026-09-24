@@ -1,6 +1,8 @@
 from app.database.base import Base
 from app.models import (  # noqa: F401
     BacktestRun,
+    BacktestEvent,
+    BacktestForwardReturn,
     BacktestTrade,
     Feature,
     MarketBarRecord,
@@ -25,6 +27,8 @@ def test_initial_schema_contains_expected_tables() -> None:
         "strategies",
         "backtest_runs",
         "backtest_trades",
+        "backtest_events",
+        "backtest_forward_returns",
         "universes",
         "universe_memberships",
         "universe_snapshots",

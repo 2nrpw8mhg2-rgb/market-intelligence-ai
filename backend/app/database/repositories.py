@@ -1,11 +1,17 @@
 from datetime import UTC, date, datetime, time
+import uuid
 from typing import Protocol
 
 from sqlalchemy import Select, and_, delete as sa_delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import MarketBarRecord, Opportunity, Strategy, Symbol, Universe, UniverseMembership, UniverseSnapshot, UniverseSnapshotMember
+from app.models import (
+    BacktestEvent, BacktestForwardReturn, BacktestRun, MarketBarRecord,
+    Opportunity, Strategy, Symbol, Universe, UniverseMembership,
+    UniverseSnapshot, UniverseSnapshotMember,
+)
+from app.schemas.backtesting import BacktestRunResult
 from app.schemas.market_data import MarketBar
 from app.schemas.scanner import OpportunityResult
 from app.schemas.universe import MembershipImportRecord
@@ -240,6 +246,23 @@ class UniverseRepository:
             for row in (await self._session.execute(statement)).all()
         ]
 
+    async def list_period_memberships(
+        self, universe_name: str, start_date: date, end_date: date
+    ) -> list[MembershipImportRecord]:
+        statement = (
+            select(Symbol.ticker, UniverseMembership.valid_from,
+                   UniverseMembership.valid_to, UniverseMembership.source)
+            .join(UniverseMembership, UniverseMembership.symbol_id == Symbol.id)
+            .join(Universe, Universe.id == UniverseMembership.universe_id)
+            .where(Universe.name == universe_name)
+            .where(UniverseMembership.valid_from <= end_date)
+            .where((UniverseMembership.valid_to.is_(None)) | (UniverseMembership.valid_to >= start_date))
+            .order_by(Symbol.ticker, UniverseMembership.valid_from)
+        )
+        return [MembershipImportRecord(ticker=row.ticker, valid_from=row.valid_from,
+                                       valid_to=row.valid_to, source=row.source)
+                for row in (await self._session.execute(statement)).all()]
+
     async def upsert_memberships(
         self, universe_name: str, records: list[MembershipImportRecord]
     ) -> int:
@@ -345,4 +368,72 @@ class OpportunityRepository:
         if min_score is not None:
             statement = statement.where(Opportunity.score >= min_score)
         statement = statement.order_by(Opportunity.timestamp.desc(), Opportunity.score.desc(), Symbol.ticker).limit(limit).offset(offset)
+        return list((await self._session.scalars(statement)).all())
+
+
+class BacktestRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def save(self, result: BacktestRunResult, configuration: dict) -> None:
+        await self._session.execute(
+            insert(Strategy).values(
+                name=result.strategy, version=result.strategy_version,
+                parameters=configuration.get("parameters", {}),
+                description="Deterministic event-study strategy",
+            ).on_conflict_do_nothing(constraint="uq_strategy_version")
+        )
+        strategy_id = await self._session.scalar(
+            select(Strategy.id).where(Strategy.name == result.strategy,
+                                      Strategy.version == result.strategy_version)
+        )
+        run_id = uuid.UUID(result.run_id)
+        values = {
+            "id": run_id, "strategy_id": strategy_id, "status": result.status,
+            "started_at": result.created_at, "completed_at": datetime.now(UTC),
+            "parameters": configuration, "metrics": result.statistics_by_horizon,
+            "limitations": result.data_quality_warnings,
+            "config_hash": result.config_hash, "universe_mode": result.universe_mode.value,
+            "universe_identifier": result.universe_identifier,
+            "start_date": result.start_date, "end_date": result.end_date,
+            "entry_model": result.entry_model.value, "benchmark": result.benchmark,
+            "event_count": result.event_count,
+            "metadata_json": result.model_dump(mode="json"),
+        }
+        statement = insert(BacktestRun).values(**values).on_conflict_do_update(
+            constraint="uq_backtest_run_config_hash",
+            set_={key: value for key, value in values.items() if key not in {"id", "config_hash"}},
+        )
+        await self._session.execute(statement)
+        await self._session.execute(sa_delete(BacktestEvent).where(BacktestEvent.backtest_run_id == run_id))
+        tickers = {event.ticker for event in result.events}
+        symbol_rows = (await self._session.execute(
+            select(Symbol.ticker, Symbol.id).where(Symbol.ticker.in_(tickers))
+        )).all() if tickers else []
+        symbol_ids = {row.ticker: row.id for row in symbol_rows}
+        for event in result.events:
+            event_id = uuid.uuid5(run_id, f"{event.ticker}:{event.signal_date}")
+            await self._session.execute(insert(BacktestEvent).values(
+                id=event_id, backtest_run_id=run_id, symbol_id=symbol_ids[event.ticker],
+                signal_date=event.signal_date, score=event.score,
+                features=event.model_dump(mode="json", exclude={"outcomes"}),
+                score_components=event.score_components,
+                entry_model=event.entry_model.value, entry_date=event.entry_date,
+                entry_price=event.entry_price,
+            ))
+            if event.outcomes:
+                await self._session.execute(insert(BacktestForwardReturn).values([
+                    {"backtest_event_id": event_id, **outcome.model_dump()}
+                    for outcome in event.outcomes
+                ]))
+        await self._session.commit()
+
+    async def get(self, run_id: uuid.UUID) -> dict | None:
+        return await self._session.scalar(
+            select(BacktestRun.metadata_json).where(BacktestRun.id == run_id)
+        )
+
+    async def list(self, limit: int = 100, offset: int = 0) -> list[dict]:
+        statement = (select(BacktestRun.metadata_json)
+                     .order_by(BacktestRun.created_at.desc()).limit(limit).offset(offset))
         return list((await self._session.scalars(statement)).all())

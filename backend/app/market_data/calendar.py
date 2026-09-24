@@ -14,6 +14,7 @@ class TradingCalendar(Protocol):
     def next_trading_day(self, value: date) -> date: ...
     def trading_days_between(self, start_date: date, end_date: date) -> list[date]: ...
     def latest_complete_session(self, now: datetime, delay_minutes: int = 0) -> date: ...
+    def session_offset(self, value: date, offset: int) -> date: ...
 
 
 class NYSETradingCalendar:
@@ -66,6 +67,10 @@ class NYSETradingCalendar:
         start = self._calendar.session_offset(end, -(count - 1))
         sessions = self._calendar.sessions_in_range(start, end)
         return [session.date() for session in sessions]
+
+    def session_offset(self, value: date, offset: int) -> date:
+        session = self._calendar.date_to_session(pd.Timestamp(value), direction="previous")
+        return self._calendar.session_offset(session, offset).date()
 
 
 def group_consecutive_sessions(

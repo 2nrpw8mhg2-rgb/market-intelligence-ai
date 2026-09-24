@@ -169,6 +169,7 @@ class Opportunity(TimestampMixin, Base):
 
 class BacktestRun(TimestampMixin, Base):
     __tablename__ = "backtest_runs"
+    __table_args__ = (UniqueConstraint("config_hash", name="uq_backtest_run_config_hash"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     strategy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("strategies.id"))
@@ -178,6 +179,50 @@ class BacktestRun(TimestampMixin, Base):
     parameters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     limitations: Mapped[list[str]] = mapped_column(JSON, default=list)
+    config_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    universe_mode: Mapped[str | None] = mapped_column(String(32))
+    universe_identifier: Mapped[str | None] = mapped_column(String(64))
+    start_date: Mapped[date | None] = mapped_column(Date)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    entry_model: Mapped[str | None] = mapped_column(String(32))
+    benchmark: Mapped[str | None] = mapped_column(String(16))
+    event_count: Mapped[int] = mapped_column(default=0)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class BacktestEvent(TimestampMixin, Base):
+    __tablename__ = "backtest_events"
+    __table_args__ = (
+        UniqueConstraint("backtest_run_id", "symbol_id", "signal_date", name="uq_backtest_event_identity"),
+        Index("ix_backtest_events_run_signal", "backtest_run_id", "signal_date"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    backtest_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("backtest_runs.id", ondelete="CASCADE"))
+    symbol_id: Mapped[int] = mapped_column(ForeignKey("symbols.id"))
+    signal_date: Mapped[date] = mapped_column(Date)
+    score: Mapped[Decimal] = mapped_column(Numeric(8, 4))
+    features: Mapped[dict[str, Any]] = mapped_column(JSON)
+    score_components: Mapped[dict[str, Any]] = mapped_column(JSON)
+    entry_model: Mapped[str] = mapped_column(String(32))
+    entry_date: Mapped[date | None] = mapped_column(Date)
+    entry_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+
+
+class BacktestForwardReturn(TimestampMixin, Base):
+    __tablename__ = "backtest_forward_returns"
+    __table_args__ = (
+        UniqueConstraint("backtest_event_id", "horizon", name="uq_backtest_forward_horizon"),
+        Index("ix_backtest_forward_event_horizon", "backtest_event_id", "horizon"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    backtest_event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("backtest_events.id", ondelete="CASCADE"))
+    horizon: Mapped[int] = mapped_column()
+    stock_return: Mapped[Decimal | None] = mapped_column(Numeric(16, 10))
+    benchmark_return: Mapped[Decimal | None] = mapped_column(Numeric(16, 10))
+    excess_return: Mapped[Decimal | None] = mapped_column(Numeric(16, 10))
+    mfe: Mapped[Decimal | None] = mapped_column(Numeric(16, 10))
+    mae: Mapped[Decimal | None] = mapped_column(Numeric(16, 10))
+    forward_data_complete: Mapped[bool] = mapped_column(default=False)
 
 
 class BacktestTrade(TimestampMixin, Base):

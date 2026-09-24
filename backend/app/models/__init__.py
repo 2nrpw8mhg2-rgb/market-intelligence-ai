@@ -1,5 +1,7 @@
 from app.models.entities import (
     BacktestRun,
+    BacktestEvent,
+    BacktestForwardReturn,
     BacktestTrade,
     Feature,
     MarketBarRecord,
@@ -15,6 +17,8 @@ from app.models.entities import (
 
 __all__ = [
     "BacktestRun",
+    "BacktestEvent",
+    "BacktestForwardReturn",
     "BacktestTrade",
     "Feature",
     "MarketBarRecord",

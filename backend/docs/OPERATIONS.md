@@ -46,6 +46,12 @@ python -m app.cli.ingest_market_data \
 
 The command downloads only missing session ranges, uses bounded concurrency, honors provider retry/rate-limit behavior and reports requests, received bars, inserted bars and per-symbol errors. Re-running a complete range is a cache hit. Reports under `backend/reports/` are intentionally ignored by Git.
 
+Before a large historical load, estimate it without provider calls:
+
+```bash
+python -m app.cli.ingest_market_data --lookback-years 5 --dry-run --requests-per-minute 5
+```
+
 ## 4. Diagnose completeness
 
 ```bash
@@ -79,4 +85,4 @@ python -m app.cli.run_scan --mode HISTORICAL --as-of-date 2026-09-22
 - No historical constituent dataset is bundled.
 - Completeness checks presence, not tick-level correctness.
 - Massive REST adjusted aggregates are split-adjusted, not dividend-adjusted.
-- No backtesting, ML, portfolio construction or order execution is included.
+- Backtesting is documented in `BACKTESTING.md`; ML, portfolio construction and order execution remain out of scope.
