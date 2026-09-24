@@ -1,4 +1,6 @@
 import asyncio
+from collections import deque
+from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from typing import Any
@@ -20,6 +22,13 @@ from app.schemas.market_data import MarketBar
 logger = get_logger(__name__)
 
 
+@dataclass
+class ProviderMetrics:
+    requests: int = 0
+    bars_received: int = 0
+    rate_limit_events: int = 0
+
+
 class _MassiveAggregate(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -27,7 +36,7 @@ class _MassiveAggregate(BaseModel):
     high: float = Field(alias="h")
     low: float = Field(alias="l")
     close: float = Field(alias="c")
-    volume: int = Field(alias="v", ge=0)
+    volume: float = Field(alias="v", ge=0)
     timestamp_ms: int = Field(alias="t")
 
 
@@ -52,6 +61,7 @@ class MassiveMarketDataProvider(MarketDataProvider):
         retry_base_seconds: float = 0.25,
         client: httpx.AsyncClient | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        requests_per_minute: int | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("MASSIVE_API_KEY is required")
@@ -62,6 +72,10 @@ class MassiveMarketDataProvider(MarketDataProvider):
         self._retry_base_seconds = retry_base_seconds
         self._client = client
         self._sleep = sleep
+        self._requests_per_minute = requests_per_minute
+        self._request_times: deque[float] = deque()
+        self._rate_lock = asyncio.Lock()
+        self.metrics = ProviderMetrics()
 
     async def get_daily_bars(
         self, ticker: str, start_date: date, end_date: date
@@ -89,17 +103,29 @@ class MassiveMarketDataProvider(MarketDataProvider):
         client = self._client or httpx.AsyncClient(timeout=self._timeout)
         try:
             while next_url:
-                payload = await self._request_json(client, next_url, params=params)
+                payload, http_status = await self._request_json(client, next_url, params=params)
                 params = {"apiKey": self._api_key}
                 try:
                     page = _MassivePage.model_validate(payload)
                 except ValidationError as exc:
-                    raise MarketDataResponseError("Massive returned an invalid response") from exc
-                if page.status not in {"OK", "DELAYED"}:
+                    first = exc.errors(include_url=False, include_input=False)[0]
+                    field = ".".join(str(part) for part in first["loc"])
                     raise MarketDataResponseError(
-                        f"Massive returned unsuccessful status: {page.status}"
+                        "Massive response validation failed "
+                        f"(http_status={http_status}, ticker={normalized_ticker}, "
+                        f"range={start_date}/{end_date}, field={field}, "
+                        f"message={self._sanitize_message(first['msg'])})"
+                    ) from exc
+                if page.status not in {"OK", "DELAYED"}:
+                    provider_message = self._payload_message(payload)
+                    raise MarketDataResponseError(
+                        "Massive returned unsuccessful status from provider "
+                        f"(http_status={http_status}, provider_status={page.status}, "
+                        f"ticker={normalized_ticker}, range={start_date}/{end_date}, "
+                        f"message={provider_message})"
                     )
                 bars.extend(self._to_bar(normalized_ticker, item) for item in page.results)
+                self.metrics.bars_received += len(page.results)
                 next_url = page.next_url
         finally:
             if owns_client:
@@ -118,12 +144,14 @@ class MassiveMarketDataProvider(MarketDataProvider):
         url: str,
         *,
         params: dict[str, Any] | None,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], int]:
         last_error: Exception | None = None
         for attempt in range(self._max_retries + 1):
             try:
+                await self._throttle()
+                self.metrics.requests += 1
                 response = await client.get(url, params=params, timeout=self._timeout)
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            except httpx.TransportError as exc:
                 last_error = exc
                 if attempt >= self._max_retries:
                     raise MarketDataError("Massive request failed after retries") from exc
@@ -131,10 +159,18 @@ class MassiveMarketDataProvider(MarketDataProvider):
                 continue
 
             if response.status_code in {401, 403}:
-                raise MarketDataAuthenticationError("Massive authentication failed")
+                raise MarketDataAuthenticationError(
+                    "Massive authentication failed "
+                    f"(http_status={response.status_code}, "
+                    f"message={self._response_message(response)})"
+                )
             if response.status_code == 429:
+                self.metrics.rate_limit_events += 1
                 if attempt >= self._max_retries:
-                    raise MarketDataRateLimitError("Massive rate limit exceeded")
+                    raise MarketDataRateLimitError(
+                        "Massive rate limit exceeded "
+                        f"(http_status=429, message={self._response_message(response)})"
+                    )
                 retry_after = response.headers.get("Retry-After")
                 delay = float(retry_after) if retry_after else self._retry_delay(attempt)
                 await self._sleep(delay)
@@ -144,22 +180,71 @@ class MassiveMarketDataProvider(MarketDataProvider):
                     "Massive server error", request=response.request, response=response
                 )
                 if attempt >= self._max_retries:
-                    raise MarketDataError("Massive server error after retries") from last_error
+                    raise MarketDataError(
+                        "Massive server error after retries "
+                        f"(http_status={response.status_code}, "
+                        f"message={self._response_message(response)})"
+                    ) from last_error
                 await self._sleep(self._retry_delay(attempt))
                 continue
             try:
                 response.raise_for_status()
                 payload = response.json()
             except (httpx.HTTPStatusError, ValueError) as exc:
-                raise MarketDataResponseError("Massive returned an invalid HTTP response") from exc
+                raise MarketDataResponseError(
+                    "Massive returned an invalid HTTP response "
+                    f"(http_status={response.status_code}, "
+                    f"message={self._response_message(response)})"
+                ) from exc
             if not isinstance(payload, dict):
-                raise MarketDataResponseError("Massive response must be a JSON object")
-            return payload
+                raise MarketDataResponseError(
+                    "Massive response must be a JSON object "
+                    f"(http_status={response.status_code})"
+                )
+            return payload, response.status_code
 
         raise MarketDataError("Massive request failed") from last_error
 
     def _retry_delay(self, attempt: int) -> float:
         return self._retry_base_seconds * (2**attempt)
+
+    async def _throttle(self) -> None:
+        if not self._requests_per_minute:
+            return
+        async with self._rate_lock:
+            loop = asyncio.get_running_loop()
+            now = loop.time()
+            while self._request_times and now - self._request_times[0] >= 60:
+                self._request_times.popleft()
+            if len(self._request_times) >= self._requests_per_minute:
+                delay = 60 - (now - self._request_times[0]) + 0.1
+                await self._sleep(delay)
+                now = loop.time()
+                while self._request_times and now - self._request_times[0] >= 60:
+                    self._request_times.popleft()
+            self._request_times.append(now)
+
+    @classmethod
+    def _response_message(cls, response: httpx.Response) -> str:
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                value = payload.get("message") or payload.get("error") or payload.get("status")
+                if value:
+                    return cls._sanitize_message(str(value))
+        except ValueError:
+            pass
+        return cls._sanitize_message(response.text or "no response message")
+
+    @classmethod
+    def _payload_message(cls, payload: dict[str, Any]) -> str:
+        value = payload.get("message") or payload.get("error") or payload.get("status")
+        return cls._sanitize_message(str(value or "no provider message"))
+
+    @staticmethod
+    def _sanitize_message(value: str) -> str:
+        # Provider messages are diagnostic only; keep them single-line and bounded.
+        return " ".join(value.split())[:300]
 
     @staticmethod
     def _to_bar(ticker: str, aggregate: _MassiveAggregate) -> MarketBar:

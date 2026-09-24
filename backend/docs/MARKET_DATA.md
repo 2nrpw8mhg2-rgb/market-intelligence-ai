@@ -4,6 +4,13 @@ This document fixes the data semantics used by Market Intelligence AI. Any futur
 
 ## S&P 500 universe
 
+Current snapshots and historical membership are deliberately separate:
+
+- `universe_snapshots` + `universe_snapshot_members` contain a dated, sourced observation of the constituents known at import time and power `LATEST` scans;
+- `universe_memberships` contains genuine `valid_from`/`valid_to` history and is the only source permitted for `HISTORICAL` scans.
+
+Importing a current CSV never manufactures historical intervals or changes the historical table.
+
 The database supports point-in-time membership through:
 
 - `universe`
@@ -29,6 +36,8 @@ Daily U.S. equity sessions use the `XNYS` calendar from [`exchange_calendars`](h
 - `previous_trading_day(date)`
 - `next_trading_day(date)`
 - `trading_days_between(start, end)` (inclusive)
+- `latest_complete_session(now, delay)` based on the actual XNYS close plus provider delay
+- `sessions_ending_on(end, count)` for exact session lookbacks
 
 Calendar dates are session labels. Stored timestamps are timezone-aware UTC. The Massive aggregates endpoint describes daily aggregates in Eastern Time, so provider timestamps are normalized to UTC and mapped to their session date before completeness checks.
 

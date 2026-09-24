@@ -55,7 +55,7 @@ class MarketBarRecord(TimestampMixin, Base):
     high: Mapped[Decimal] = mapped_column(Numeric(20, 8))
     low: Mapped[Decimal] = mapped_column(Numeric(20, 8))
     close: Mapped[Decimal] = mapped_column(Numeric(20, 8))
-    volume: Mapped[int] = mapped_column(BigInteger)
+    volume: Mapped[Decimal] = mapped_column(Numeric(24, 6))
     provider: Mapped[str] = mapped_column(String(32))
 
 
@@ -96,6 +96,24 @@ class UniverseMembership(TimestampMixin, Base):
     )
 
 
+class UniverseSnapshot(Base):
+    __tablename__ = "universe_snapshots"
+    __table_args__ = (UniqueConstraint("universe_id", "snapshot_date", "source", name="uq_universe_snapshot_identity"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    universe_id: Mapped[int] = mapped_column(ForeignKey("universes.id", ondelete="CASCADE"))
+    snapshot_date: Mapped[date] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(255))
+    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UniverseSnapshotMember(Base):
+    __tablename__ = "universe_snapshot_members"
+    __table_args__ = (UniqueConstraint("snapshot_id", "symbol_id", name="uq_universe_snapshot_member"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("universe_snapshots.id", ondelete="CASCADE"))
+    symbol_id: Mapped[int] = mapped_column(ForeignKey("symbols.id", ondelete="CASCADE"))
+
+
 class Feature(TimestampMixin, Base):
     __tablename__ = "features"
     __table_args__ = (
@@ -112,9 +130,10 @@ class Feature(TimestampMixin, Base):
 
 class Strategy(TimestampMixin, Base):
     __tablename__ = "strategies"
+    __table_args__ = (UniqueConstraint("name", "version", name="uq_strategy_version"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
     version: Mapped[str] = mapped_column(String(32))
     parameters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     description: Mapped[str | None] = mapped_column(Text)
@@ -122,7 +141,13 @@ class Strategy(TimestampMixin, Base):
 
 class Opportunity(TimestampMixin, Base):
     __tablename__ = "opportunities"
-    __table_args__ = (Index("ix_opportunities_symbol_timestamp", "symbol_id", "timestamp"),)
+    __table_args__ = (
+        Index("ix_opportunities_symbol_timestamp", "symbol_id", "timestamp"),
+        UniqueConstraint(
+            "symbol_id", "timestamp", "strategy_id", "configuration_hash",
+            name="uq_opportunity_identity",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     symbol_id: Mapped[int] = mapped_column(ForeignKey("symbols.id", ondelete="CASCADE"))
@@ -133,6 +158,13 @@ class Opportunity(TimestampMixin, Base):
     score: Mapped[Decimal | None] = mapped_column(Numeric(6, 3))
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     score_components: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    universe: Mapped[str] = mapped_column(String(32))
+    strategy_version: Mapped[str] = mapped_column(String(32))
+    configuration_hash: Mapped[str] = mapped_column(String(64))
+    configuration: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    data_provider: Mapped[str] = mapped_column(String(32))
+    session_status: Mapped[str] = mapped_column(String(32))
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class BacktestRun(TimestampMixin, Base):

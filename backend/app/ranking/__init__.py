@@ -1,1 +1,3 @@
-"""Opportunity ranking placeholder for the next approved phase."""
+from app.ranking.breakout import BreakoutRanker
+
+__all__ = ["BreakoutRanker"]

@@ -40,6 +40,38 @@ async def test_get_daily_bars_maps_ohlcv_and_normalizes_ticker() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fractional_adjusted_volume_is_preserved() -> None:
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": "OK", "results": [
+            {"o": 100, "h": 105, "l": 99, "c": 103,
+             "v": 37_308_155.220558, "t": 1704067200000}
+        ]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        bars = await MassiveMarketDataProvider(
+            api_key="secret", client=client
+        ).get_daily_bars("AAPL", date(2024, 1, 1), date(2024, 1, 1))
+
+    assert bars[0].volume == pytest.approx(37_308_155.220558)
+
+
+@pytest.mark.asyncio
+async def test_http_error_contains_sanitized_diagnostics() -> None:
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": "invalid date range"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = MassiveMarketDataProvider(api_key="secret", client=client)
+        with pytest.raises(MarketDataResponseError) as captured:
+            await provider.get_daily_bars("AAPL", date(2024, 1, 1), date(2024, 1, 2))
+
+    message = str(captured.value)
+    assert "http_status=400" in message
+    assert "invalid date range" in message
+    assert "secret" not in message
+
+
+@pytest.mark.asyncio
 async def test_get_daily_bars_follows_pagination() -> None:
     requests: list[httpx.Request] = []
 
@@ -152,6 +184,30 @@ async def test_server_error_retries_then_fails() -> None:
         with pytest.raises(MarketDataError, match="server error"):
             await provider.get_daily_bars("AAPL", date(2024, 1, 1), date(2024, 1, 2))
 
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_remote_protocol_error_is_retried() -> None:
+    calls = 0
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.RemoteProtocolError("server disconnected")
+        return httpx.Response(200, json={"status": "OK", "results": []})
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = MassiveMarketDataProvider(
+            api_key="secret", client=client, max_retries=1, sleep=no_sleep
+        )
+        assert await provider.get_daily_bars(
+            "EXC", date(2024, 1, 1), date(2024, 1, 2)
+        ) == []
     assert calls == 2
 
 

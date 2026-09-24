@@ -12,7 +12,8 @@ class MarketBar(BaseModel):
     high: float = Field(gt=0)
     low: float = Field(gt=0)
     close: float = Field(gt=0)
-    volume: int = Field(ge=0)
+    # Split-adjusted aggregates can contain fractional share volume.
+    volume: float = Field(ge=0)
 
     @field_validator("ticker")
     @classmethod

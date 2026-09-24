@@ -2,7 +2,7 @@
 
 Plataforma de investigação quantitativa para analisar dados históricos do mercado acionista norte-americano, testar hipóteses e identificar condições mensuráveis. O projeto não produz aconselhamento financeiro nem executa ordens.
 
-A Fase 3 contém a fundação técnica, persistência OHLCV idempotente, universos point-in-time, calendário oficial XNYS, validação de completude por sessão, Feature Engine determinístico e um endpoint de desenvolvimento para consultar features armazenadas. Scanner, ranking, backtesting, ML e trading ainda não estão implementados.
+A Fase 4.5 operacionaliza o scanner determinístico `BREAKOUT_20D_VOLUME`: snapshots atuais separados do histórico point-in-time, ingestão incremental Massive, diagnóstico de completude, sessão `LATEST` consciente do fecho e explicações auditáveis. Backtesting, ML e trading ainda não estão implementados.
 
 ## Arquitetura
 
@@ -66,6 +66,8 @@ Variáveis atuais:
 | `DATABASE_URL` | URL SQLAlchemy assíncrona do PostgreSQL |
 | `ENVIRONMENT` | Ambiente, por exemplo `development` ou `production` |
 | `LOG_LEVEL` | Nível de logging |
+| `PROVIDER_DATA_DELAY_MINUTES` | Atraso após o fecho XNYS antes de uma sessão ser elegível (180 por defeito, validado operacionalmente) |
+| `INGESTION_CONCURRENCY` | Concorrência máxima da ingestão administrativa (2 por defeito) |
 
 `ALPACA_API_KEY`, `ALPACA_SECRET_KEY` e `OPENAI_API_KEY` estão apenas reservadas. Não são usadas nesta fase.
 
@@ -117,7 +119,7 @@ pytest --cov=app --cov-report=term-missing
 {
   "status": "ok",
   "service": "market-intelligence-api",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "environment": "development"
 }
 ```
@@ -147,7 +149,7 @@ curl 'http://localhost:8000/api/v1/features/AAPL?start_date=2024-01-01&end_date=
 
 ## Base de dados
 
-As duas migrações criam:
+As migrações criam:
 
 - `symbols`
 - `market_bars`
@@ -158,6 +160,8 @@ As duas migrações criam:
 - `backtest_trades`
 - `universes`
 - `universe_memberships`
+- `universe_snapshots`
+- `universe_snapshot_members`
 - `securities`
 
 A identidade de uma barra é `ticker + timestamp + timeframe + provider`, materializada através de `symbol_id` e de uma constraint única PostgreSQL. Os universos guardam `valid_from`, `valid_to`, `source` e `loaded_at`, permitindo consultas point-in-time. `securities` fornece uma identidade estável opcional separada do ticker. Valores monetários usam `NUMERIC`; timestamps são timezone-aware.
@@ -167,6 +171,20 @@ A identidade de uma barra é `ticker + timestamp + timeframe + provider`, materi
 O motor recebe OHLCV cronológico e devolve o mesmo `DataFrame` com SMA 20/50/200, EMA 20, RSI 14, MACD, ATR 14, retornos, volume relativo, máximos/mínimos anteriores, volatilidade e momentum. As fórmulas, warm-ups e políticas de qualidade estão em [backend/docs/FEATURES.md](backend/docs/FEATURES.md).
 
 Premissas de dados, calendário, S&P 500, corporate actions e alterações de ticker estão em [backend/docs/MARKET_DATA.md](backend/docs/MARKET_DATA.md).
+
+A estratégia, filtros, score e API do scanner estão documentados em [backend/docs/SCANNER.md](backend/docs/SCANNER.md).
+
+O procedimento completo para importar o universo atual, ingerir dados, diagnosticar lacunas e executar scans está em [backend/docs/OPERATIONS.md](backend/docs/OPERATIONS.md).
+
+## Scanner
+
+```bash
+curl -X POST http://localhost:8000/api/v1/scan \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"HISTORICAL","universe":"SP500","strategy":"BREAKOUT_20D_VOLUME","as_of_date":"2026-09-23"}'
+```
+
+Para `LATEST`, importe um snapshot atual identificado e ingira pelo menos 200 sessões de barras Massive por ticker. Para `HISTORICAL`, carregue memberships point-in-time genuínos; o snapshot atual nunca é reutilizado como história. Não declare um scan real sem esses dados.
 
 Máximos e mínimos anteriores usam sempre `shift(1)` antes da janela. A sessão atual nunca entra no limiar contra o qual é comparada.
 
@@ -181,8 +199,8 @@ npm run dev
 
 ## Limitações atuais
 
-- Não existe scanner, ranking, backtesting, ML ou trading.
-- Ainda não existe endpoint público de ingestão; a ingestão é um serviço interno para que autenticação e limites operacionais sejam definidos antes da exposição HTTP.
+- Não existe backtesting, ML ou trading.
+- A ingestão é deliberadamente uma CLI administrativa, não um endpoint público.
 - A disponibilidade e profundidade histórica dependem do plano Massive.
 - O schema e importador suportam composição point-in-time do S&P 500, mas nenhuma fonte histórica é fabricada ou distribuída. É necessário carregar uma fonte autorizada.
 - XNYS identifica sessões de mercado, mas não explica suspensões, halts ou períodos fora da vida de uma security.
@@ -190,4 +208,4 @@ npm run dev
 
 ## Próxima fase recomendada
 
-Após aprovação da Fase 3: selecionar/carregar uma fonte histórica autorizada do S&P 500 e definir políticas para gaps específicos de cada security. Só depois implementar o scanner `BREAKOUT_20D_VOLUME`, com configuração versionada e testes de look-ahead. Backtesting continua fora desta fase.
+Após configurar base de dados, chave Massive e uma fonte identificada para o snapshot, executar a checklist operacional da Fase 4.5. Só depois avançar para a Fase 5 de backtesting, sem reutilizar informação futura.

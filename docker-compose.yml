@@ -23,6 +23,7 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}
+      PROVIDER_DATA_DELAY_MINUTES: ${PROVIDER_DATA_DELAY_MINUTES:-180}
     ports:
       - "8000:8000"
     depends_on:

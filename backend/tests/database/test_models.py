@@ -10,6 +10,8 @@ from app.models import (  # noqa: F401
     Symbol,
     Universe,
     UniverseMembership,
+    UniverseSnapshot,
+    UniverseSnapshotMember,
 )
 
 
@@ -25,6 +27,8 @@ def test_initial_schema_contains_expected_tables() -> None:
         "backtest_trades",
         "universes",
         "universe_memberships",
+        "universe_snapshots",
+        "universe_snapshot_members",
     }
 
 
@@ -45,3 +49,13 @@ def test_market_bar_identity_includes_provider() -> None:
     }
 
     assert ("symbol_id", "timestamp", "timeframe", "provider") in unique_columns
+
+
+def test_opportunity_identity_preserves_distinct_configurations() -> None:
+    constraints = Base.metadata.tables["opportunities"].constraints
+    unique_columns = {
+        tuple(column.name for column in constraint.columns)
+        for constraint in constraints
+        if constraint.__class__.__name__ == "UniqueConstraint"
+    }
+    assert ("symbol_id", "timestamp", "strategy_id", "configuration_hash") in unique_columns

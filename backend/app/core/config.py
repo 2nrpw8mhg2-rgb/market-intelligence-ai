@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     massive_timeout_seconds: float = 15.0
     massive_max_retries: int = 3
     massive_retry_base_seconds: float = 0.25
+    provider_data_delay_minutes: int = Field(default=180, ge=0)
+    ingestion_concurrency: int = Field(default=2, ge=1, le=20)
 
     alpaca_api_key: SecretStr = Field(default=SecretStr(""))
     alpaca_secret_key: SecretStr = Field(default=SecretStr(""))

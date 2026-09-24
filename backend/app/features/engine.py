@@ -25,6 +25,7 @@ class FeatureEngine:
         "RETURN_20D",
         "AVG_VOLUME_20D",
         "RELATIVE_VOLUME",
+        "AVG_DOLLAR_VOLUME_20D",
         "PREVIOUS_HIGH_20D",
         "PREVIOUS_HIGH_50D",
         "PREVIOUS_LOW_20D",
@@ -80,8 +81,11 @@ class FeatureEngine:
         data["RETURN_1D"] = returns_1d
         data["RETURN_5D"] = close.pct_change(5, fill_method=None)
         data["RETURN_20D"] = close.pct_change(20, fill_method=None)
-        data["AVG_VOLUME_20D"] = volume.rolling(20, min_periods=20).mean()
+        data["AVG_VOLUME_20D"] = volume.shift(1).rolling(20, min_periods=20).mean()
         data["RELATIVE_VOLUME"] = volume / data["AVG_VOLUME_20D"].replace(0, np.nan)
+        data["AVG_DOLLAR_VOLUME_20D"] = (
+            (close * volume).shift(1).rolling(20, min_periods=20).mean()
+        )
         data["PREVIOUS_HIGH_20D"] = high.shift(1).rolling(20, min_periods=20).max()
         data["PREVIOUS_HIGH_50D"] = high.shift(1).rolling(50, min_periods=50).max()
         data["PREVIOUS_LOW_20D"] = low.shift(1).rolling(20, min_periods=20).min()

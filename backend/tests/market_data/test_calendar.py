@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -48,3 +48,21 @@ def test_missing_sessions_are_grouped_by_market_adjacency() -> None:
     )
 
     assert groups == [(date(2024, 7, 2), date(2024, 7, 5))]
+
+
+def test_latest_complete_session_respects_close_and_provider_delay(calendar) -> None:
+    # Regular close is 20:00 UTC in July.
+    assert calendar.latest_complete_session(datetime(2024, 7, 5, 20, 29, tzinfo=UTC), 30) == date(2024, 7, 3)
+    assert calendar.latest_complete_session(datetime(2024, 7, 5, 20, 30, tzinfo=UTC), 30) == date(2024, 7, 5)
+
+
+def test_latest_complete_session_handles_weekend_and_early_close(calendar) -> None:
+    assert calendar.latest_complete_session(datetime(2024, 7, 6, 12, tzinfo=UTC), 30) == date(2024, 7, 5)
+    # 3 July 2024 closed at 17:00 UTC.
+    assert calendar.latest_complete_session(datetime(2024, 7, 3, 17, 29, tzinfo=UTC), 30) == date(2024, 7, 2)
+    assert calendar.latest_complete_session(datetime(2024, 7, 3, 17, 30, tzinfo=UTC), 30) == date(2024, 7, 3)
+
+
+def test_sessions_ending_on_has_exact_lookback(calendar) -> None:
+    sessions = calendar.sessions_ending_on(date(2024, 7, 5), 3)
+    assert sessions == [date(2024, 7, 2), date(2024, 7, 3), date(2024, 7, 5)]

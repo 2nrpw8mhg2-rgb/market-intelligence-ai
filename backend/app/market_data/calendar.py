@@ -1,5 +1,5 @@
 from collections.abc import Iterable
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
 
 import exchange_calendars as xcals
@@ -13,6 +13,7 @@ class TradingCalendar(Protocol):
     def previous_trading_day(self, value: date) -> date: ...
     def next_trading_day(self, value: date) -> date: ...
     def trading_days_between(self, start_date: date, end_date: date) -> list[date]: ...
+    def latest_complete_session(self, now: datetime, delay_minutes: int = 0) -> date: ...
 
 
 class NYSETradingCalendar:
@@ -44,6 +45,26 @@ class NYSETradingCalendar:
         sessions = self._calendar.sessions_in_range(
             pd.Timestamp(start_date), pd.Timestamp(end_date)
         )
+        return [session.date() for session in sessions]
+
+    def latest_complete_session(self, now: datetime, delay_minutes: int = 0) -> date:
+        """Last XNYS session whose real close plus provider delay has elapsed."""
+        if now.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        now_utc = now.astimezone(UTC)
+        today = pd.Timestamp(now_utc.date())
+        candidate = self._calendar.date_to_session(today, direction="previous")
+        close = self._calendar.session_close(candidate).to_pydatetime()
+        if now_utc >= close + timedelta(minutes=delay_minutes):
+            return candidate.date()
+        return self._calendar.previous_session(candidate).date()
+
+    def sessions_ending_on(self, end_date: date, count: int) -> list[date]:
+        if count < 1:
+            raise ValueError("count must be positive")
+        end = self._calendar.date_to_session(pd.Timestamp(end_date), direction="previous")
+        start = self._calendar.session_offset(end, -(count - 1))
+        sessions = self._calendar.sessions_in_range(start, end)
         return [session.date() for session in sessions]
 
 

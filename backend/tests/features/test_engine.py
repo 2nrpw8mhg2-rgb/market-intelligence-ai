@@ -43,8 +43,10 @@ def test_returns_volume_levels_volatility_and_momentum() -> None:
     assert last["RETURN_1D"] == pytest.approx(240 / 239 - 1)
     assert last["RETURN_5D"] == pytest.approx(240 / 235 - 1)
     assert last["RETURN_20D"] == pytest.approx(240 / 220 - 1)
-    assert last["AVG_VOLUME_20D"] == pytest.approx(329.5)
-    assert last["RELATIVE_VOLUME"] == pytest.approx(339 / 329.5)
+    assert last["AVG_VOLUME_20D"] == pytest.approx(328.5)
+    assert last["RELATIVE_VOLUME"] == pytest.approx(339 / 328.5)
+    expected_dollar_volume = np.mean(np.arange(220, 240) * np.arange(319, 339))
+    assert last["AVG_DOLLAR_VOLUME_20D"] == pytest.approx(expected_dollar_volume)
     assert last["PREVIOUS_HIGH_20D"] == pytest.approx(240.0)
     assert last["PREVIOUS_HIGH_50D"] == pytest.approx(240.0)
     assert last["PREVIOUS_LOW_20D"] == pytest.approx(219.0)
@@ -63,6 +65,8 @@ def test_warm_up_periods_are_not_shortened() -> None:
     assert result["SMA_200"].isna().all()
     assert result["PREVIOUS_HIGH_20D"].iloc[:20].isna().all()
     assert result["PREVIOUS_HIGH_20D"].iloc[20] == pytest.approx(21.0)
+    assert result["AVG_VOLUME_20D"].iloc[:20].isna().all()
+    assert result["AVG_VOLUME_20D"].iloc[20] == pytest.approx(109.5)
 
 
 def test_future_changes_do_not_modify_historical_features() -> None:
@@ -76,6 +80,19 @@ def test_future_changes_do_not_modify_historical_features() -> None:
 
     pd.testing.assert_frame_equal(before, after)
     assert engine.calculate(mutated).iloc[79]["PREVIOUS_HIGH_20D"] == pytest.approx(80.0)
+
+
+def test_current_volume_is_excluded_from_reference_average() -> None:
+    original = make_frame(30)
+    mutated = original.copy()
+    mutated.loc[29, "volume"] = 1_000_000
+
+    before = FeatureEngine().calculate(original).iloc[-1]
+    after = FeatureEngine().calculate(mutated).iloc[-1]
+
+    assert before["AVG_VOLUME_20D"] == after["AVG_VOLUME_20D"]
+    assert before["AVG_DOLLAR_VOLUME_20D"] == after["AVG_DOLLAR_VOLUME_20D"]
+    assert before["RELATIVE_VOLUME"] != after["RELATIVE_VOLUME"]
 
 
 @pytest.mark.parametrize(

@@ -9,6 +9,8 @@ from app.models.entities import (
     Symbol,
     Universe,
     UniverseMembership,
+    UniverseSnapshot,
+    UniverseSnapshotMember,
 )
 
 __all__ = [
@@ -22,4 +24,6 @@ __all__ = [
     "Symbol",
     "Universe",
     "UniverseMembership",
+    "UniverseSnapshot",
+    "UniverseSnapshotMember",
 ]

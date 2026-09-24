@@ -19,6 +19,9 @@ class MarketUniverse(ABC):
     async def members(self, as_of: date) -> list[str]:
         raise NotImplementedError
 
+    async def current_members(self) -> list[str]:
+        raise NotImplementedError
+
 
 class SP500Universe(MarketUniverse):
     name = UniverseName.SP500
@@ -28,3 +31,6 @@ class SP500Universe(MarketUniverse):
 
     async def members(self, as_of: date) -> list[str]:
         return await self._repository.list_members(self.name.value, as_of)
+
+    async def current_members(self) -> list[str]:
+        return await self._repository.list_current_members(self.name.value)

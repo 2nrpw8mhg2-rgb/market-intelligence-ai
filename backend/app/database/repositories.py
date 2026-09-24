@@ -1,13 +1,15 @@
 from datetime import UTC, date, datetime, time
 from typing import Protocol
 
-from sqlalchemy import Select, and_, func, select
+from sqlalchemy import Select, and_, delete as sa_delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import MarketBarRecord, Symbol, Universe, UniverseMembership
+from app.models import MarketBarRecord, Opportunity, Strategy, Symbol, Universe, UniverseMembership, UniverseSnapshot, UniverseSnapshotMember
 from app.schemas.market_data import MarketBar
+from app.schemas.scanner import OpportunityResult
 from app.schemas.universe import MembershipImportRecord
+from app.schemas.universe import CurrentSnapshotImport
 
 
 class MarketBarStore(Protocol):
@@ -54,7 +56,7 @@ class MarketBarRepository:
                 high=float(row.MarketBarRecord.high),
                 low=float(row.MarketBarRecord.low),
                 close=float(row.MarketBarRecord.close),
-                volume=row.MarketBarRecord.volume,
+                volume=float(row.MarketBarRecord.volume),
             )
             for row in rows
         ]
@@ -107,6 +109,30 @@ class MarketBarRepository:
         await self._session.commit()
         return result.rowcount or 0
 
+    async def daily_bar_diagnostics(
+        self, ticker: str, start_date: date, end_date: date, *, provider: str
+    ) -> dict:
+        statement = (
+            select(
+                func.count(MarketBarRecord.id).label("bar_count"),
+                func.min(MarketBarRecord.timestamp).label("first_timestamp"),
+                func.max(MarketBarRecord.timestamp).label("last_timestamp"),
+                func.max(MarketBarRecord.updated_at).label("last_updated"),
+            )
+            .join(Symbol, Symbol.id == MarketBarRecord.symbol_id)
+            .where(Symbol.ticker == ticker.strip().upper())
+            .where(MarketBarRecord.provider == provider)
+            .where(MarketBarRecord.timeframe == "1d")
+        )
+        statement = self._with_date_filters(statement, start_date, end_date)
+        row = (await self._session.execute(statement)).one()
+        return {
+            "bar_count": row.bar_count,
+            "first_session": row.first_timestamp.date() if row.first_timestamp else None,
+            "last_session": row.last_timestamp.date() if row.last_timestamp else None,
+            "last_updated": row.last_updated,
+        }
+
     @staticmethod
     def _with_date_filters(
         statement: Select,
@@ -144,6 +170,48 @@ class UniverseRepository:
             .order_by(Symbol.ticker)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def list_current_members(self, universe_name: str) -> list[str]:
+        latest_snapshot = (
+            select(UniverseSnapshot.id)
+            .join(Universe)
+            .where(Universe.name == universe_name)
+            .order_by(UniverseSnapshot.snapshot_date.desc(), UniverseSnapshot.loaded_at.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        statement = (
+            select(Symbol.ticker)
+            .join(UniverseSnapshotMember, UniverseSnapshotMember.symbol_id == Symbol.id)
+            .where(UniverseSnapshotMember.snapshot_id == latest_snapshot)
+            .order_by(Symbol.ticker)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def import_current_snapshot(self, universe_name: str, snapshot: CurrentSnapshotImport) -> int:
+        await self._session.execute(
+            insert(Universe).values(name=universe_name, description="Current constituent snapshots")
+            .on_conflict_do_nothing(index_elements=[Universe.name])
+        )
+        universe_id = await self._session.scalar(select(Universe.id).where(Universe.name == universe_name))
+        await self._session.execute(
+            insert(Symbol).values([{"ticker": ticker, "asset_type": "stock", "metadata_json": {}} for ticker in snapshot.tickers])
+            .on_conflict_do_nothing(index_elements=[Symbol.ticker])
+        )
+        snapshot_statement = insert(UniverseSnapshot).values(
+            universe_id=universe_id, snapshot_date=snapshot.snapshot_date, source=snapshot.source
+        ).on_conflict_do_update(
+            constraint="uq_universe_snapshot_identity", set_={"loaded_at": func.now()}
+        ).returning(UniverseSnapshot.id)
+        snapshot_id = (await self._session.execute(snapshot_statement)).scalar_one()
+        symbol_rows = (await self._session.execute(select(Symbol.ticker, Symbol.id).where(Symbol.ticker.in_(snapshot.tickers)))).all()
+        # A re-import replaces this snapshot's exact membership, not historical records.
+        await self._session.execute(sa_delete(UniverseSnapshotMember).where(UniverseSnapshotMember.snapshot_id == snapshot_id))
+        await self._session.execute(insert(UniverseSnapshotMember).values([
+            {"snapshot_id": snapshot_id, "symbol_id": row.id} for row in symbol_rows
+        ]))
+        await self._session.commit()
+        return len(symbol_rows)
 
     async def list_membership_records(
         self, universe_name: str, tickers: set[str]
@@ -222,3 +290,59 @@ class UniverseRepository:
         result = await self._session.execute(statement)
         await self._session.commit()
         return result.rowcount or 0
+
+
+class OpportunityRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert(self, opportunities: list[OpportunityResult], configuration: dict) -> None:
+        for item in opportunities:
+            await self._session.execute(
+                insert(Strategy).values(
+                    name=item.strategy, version=item.strategy_version,
+                    parameters=configuration.get("parameters", {}), description="Deterministic scanner strategy",
+                ).on_conflict_do_nothing(constraint="uq_strategy_version")
+            )
+            strategy_id = await self._session.scalar(
+                select(Strategy.id).where(Strategy.name == item.strategy, Strategy.version == item.strategy_version)
+            )
+            symbol_id = await self._session.scalar(select(Symbol.id).where(Symbol.ticker == item.ticker))
+            if strategy_id is None or symbol_id is None:
+                raise RuntimeError("opportunity references unresolved strategy or symbol")
+            values = {
+                "symbol_id": symbol_id, "strategy_id": strategy_id,
+                "timestamp": datetime.combine(item.as_of_date, time.min, tzinfo=UTC),
+                "pattern": item.strategy, "price": item.price, "score": item.score,
+                "details": item.model_dump(mode="json"), "score_components": item.score_components,
+                "universe": item.universe, "strategy_version": item.strategy_version,
+                "configuration_hash": item.configuration_hash, "configuration": configuration,
+                "data_provider": item.data_provider, "session_status": item.session_status,
+                "executed_at": item.executed_at,
+            }
+            statement = insert(Opportunity).values(**values)
+            statement = statement.on_conflict_do_update(
+                constraint="uq_opportunity_identity",
+                set_={key: value for key, value in values.items() if key not in {"symbol_id", "strategy_id", "timestamp", "configuration_hash"}},
+            )
+            await self._session.execute(statement)
+        await self._session.commit()
+
+    async def list(
+        self, *, scan_date: date | None = None, ticker: str | None = None,
+        strategy: str | None = None, universe: str | None = None,
+        min_score: float | None = None, limit: int = 100, offset: int = 0,
+    ) -> list[dict]:
+        statement = select(Opportunity.details).join(Symbol).join(Strategy)
+        if scan_date:
+            statement = statement.where(func.date(Opportunity.timestamp) == scan_date)
+        if ticker:
+            statement = statement.where(Symbol.ticker == ticker.upper())
+        if strategy:
+            statement = statement.where(Strategy.name == strategy)
+        if universe:
+            statement = statement.where(Opportunity.universe == universe)
+        if min_score is not None:
+            statement = statement.where(Opportunity.score >= min_score)
+        statement = statement.order_by(Opportunity.timestamp.desc(), Opportunity.score.desc(), Symbol.ticker).limit(limit).offset(offset)
+        return list((await self._session.scalars(statement)).all())

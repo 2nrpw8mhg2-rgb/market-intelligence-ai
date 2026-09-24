@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from app import __version__
 from app.api.errors import install_exception_handlers
-from app.api.routes import features, health
+from app.api.routes import features, health, scanner
 from app.core.logging import configure_logging, get_logger
 
 
@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
     install_exception_handlers(app)
     app.include_router(health.router)
     app.include_router(features.router)
+    app.include_router(scanner.router)
     return app
 
 
