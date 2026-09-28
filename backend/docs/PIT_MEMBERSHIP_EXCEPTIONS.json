@@ -1,0 +1,15 @@
+{
+  "6d107392-1574-5d84-9836-defb4f684946": {
+    "ticker": "MRP_OLD",
+    "classification": "EXPLICITLY_NON_TRADABLE_OR_INVALID",
+    "effective_interval": "2025-01-21/2025-02-10",
+    "evidence": "The source interval starts on Lennar's distribution record date, not a Millrose trading or S&P 500 entry date. Lennar's issuer announcement says MRP when-issued trading began about 2025-02-05 and regular-way trading began 2025-02-07. S&P DJI says Lennar remained in the S&P 500 and Millrose entered the S&P SmallCap 600 effective 2025-02-10. SEC disclosure says there was no public market before 2025-02-05. EODHD has no MRP_OLD bars or stable identifiers; MRP.US begins 2025-02-05. The record is retained for audit but excluded from tradable S&P 500 eligibility.",
+    "sources": [
+      "EODHD HistoricalTickerComponents POC3 cache",
+      "EODHD MRP_OLD/MRP.US cached General and EOD responses",
+      "Lennar 2025-01-10 spin-off announcement",
+      "S&P DJI 2025-02-05 constituent announcement",
+      "Millrose SEC 2025 Form 10-K"
+    ]
+  }
+}

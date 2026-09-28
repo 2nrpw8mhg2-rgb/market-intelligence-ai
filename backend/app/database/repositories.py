@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime, time
 import uuid
 from typing import Protocol
 
-from sqlalchemy import Select, and_, delete as sa_delete, func, select
+from sqlalchemy import Select, and_, delete as sa_delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +10,7 @@ from app.models import (
     BacktestEvent, BacktestForwardReturn, BacktestRun, MarketBarRecord,
     MarketRegimeObservation, Opportunity, PortfolioDailyEquity,
     PortfolioSimulationRun, PortfolioSkippedSignal, PortfolioTradeRecord,
-    ResearchRun, Strategy, Symbol, Universe, UniverseMembership,
+    ResearchRun, Security, Strategy, Symbol, Universe, UniverseMembership,
     UniverseSnapshot, UniverseSnapshotMember,
 )
 from app.schemas.backtesting import BacktestRunResult
@@ -170,7 +170,9 @@ class UniverseRepository:
 
     async def list_members(self, universe_name: str, as_of: date) -> list[str]:
         statement = (
-            select(Symbol.ticker)
+            select(Symbol.ticker, Symbol.security_id.label("symbol_security_id"),
+                   UniverseMembership.security_id,
+                   UniverseMembership.eligibility_status)
             .join(UniverseMembership, UniverseMembership.symbol_id == Symbol.id)
             .join(Universe, Universe.id == UniverseMembership.universe_id)
             .where(Universe.name == universe_name)
@@ -178,12 +180,19 @@ class UniverseRepository:
             .where(
                 and_(
                     (UniverseMembership.valid_to.is_(None))
-                    | (UniverseMembership.valid_to >= as_of)
+                    | (UniverseMembership.valid_to > as_of)
                 )
             )
             .order_by(Symbol.ticker)
         )
-        return list((await self._session.scalars(statement)).all())
+        rows = (await self._session.execute(statement)).all()
+        rows = self._validated_membership_rows(rows)
+        security_ids = [row.security_id for row in rows]
+        if len(security_ids) != len(set(security_ids)):
+            raise PITIdentityResolutionError(
+                f"duplicate eligible security_id in {universe_name} on {as_of}"
+            )
+        return [row.ticker for row in rows]
 
     async def list_current_members(self, universe_name: str) -> list[str]:
         latest_snapshot = (
@@ -235,9 +244,15 @@ class UniverseRepository:
         statement = (
             select(
                 Symbol.ticker,
+                Symbol.name.label("security_name"),
+                Symbol.security_id.label("symbol_security_id"),
+                UniverseMembership.security_id,
                 UniverseMembership.valid_from,
                 UniverseMembership.valid_to,
                 UniverseMembership.source,
+                UniverseMembership.source_confidence,
+                UniverseMembership.provenance_json,
+                UniverseMembership.eligibility_status,
             )
             .join(UniverseMembership, UniverseMembership.symbol_id == Symbol.id)
             .join(Universe, Universe.id == UniverseMembership.universe_id)
@@ -246,30 +261,44 @@ class UniverseRepository:
         )
         return [
             MembershipImportRecord(
+                security_id=row.security_id,
                 ticker=row.ticker,
+                security_name=row.security_name,
                 valid_from=row.valid_from,
                 valid_to=row.valid_to,
                 source=row.source,
+                source_confidence=row.source_confidence,
+                provenance=row.provenance_json,
+                eligibility_status=row.eligibility_status,
             )
-            for row in (await self._session.execute(statement)).all()
+            for row in self._validated_membership_rows((await self._session.execute(statement)).all(), include_non_tradable=True)
         ]
 
     async def list_period_memberships(
         self, universe_name: str, start_date: date, end_date: date
     ) -> list[MembershipImportRecord]:
         statement = (
-            select(Symbol.ticker, UniverseMembership.valid_from,
-                   UniverseMembership.valid_to, UniverseMembership.source)
+            select(Symbol.ticker, Symbol.name.label("security_name"),
+                   Symbol.security_id.label("symbol_security_id"),
+                   UniverseMembership.security_id, UniverseMembership.valid_from,
+                   UniverseMembership.valid_to, UniverseMembership.source,
+                   UniverseMembership.source_confidence,
+                   UniverseMembership.provenance_json,
+                   UniverseMembership.eligibility_status)
             .join(UniverseMembership, UniverseMembership.symbol_id == Symbol.id)
             .join(Universe, Universe.id == UniverseMembership.universe_id)
             .where(Universe.name == universe_name)
             .where(UniverseMembership.valid_from <= end_date)
-            .where((UniverseMembership.valid_to.is_(None)) | (UniverseMembership.valid_to >= start_date))
+            .where((UniverseMembership.valid_to.is_(None)) | (UniverseMembership.valid_to > start_date))
             .order_by(Symbol.ticker, UniverseMembership.valid_from)
         )
-        return [MembershipImportRecord(ticker=row.ticker, valid_from=row.valid_from,
-                                       valid_to=row.valid_to, source=row.source)
-                for row in (await self._session.execute(statement)).all()]
+        rows = self._validated_membership_rows((await self._session.execute(statement)).all())
+        return [MembershipImportRecord(
+            security_id=row.security_id, ticker=row.ticker, security_name=row.security_name,
+            valid_from=row.valid_from, valid_to=row.valid_to, source=row.source,
+            source_confidence=row.source_confidence, provenance=row.provenance_json,
+            eligibility_status=row.eligibility_status,
+        ) for row in rows]
 
     async def upsert_memberships(
         self, universe_name: str, records: list[MembershipImportRecord]
@@ -286,12 +315,25 @@ class UniverseRepository:
         )
         if universe_id is None:
             raise RuntimeError(f"could not resolve universe {universe_name}")
-        tickers = sorted({record.ticker for record in records})
+        by_ticker: dict[str, uuid.UUID] = {}
+        for record in records:
+            existing_security = by_ticker.setdefault(record.ticker, record.security_id)
+            if existing_security != record.security_id:
+                raise PITIdentityResolutionError(
+                    f"ticker {record.ticker} is associated with multiple security_id values"
+                )
+        securities = {record.security_id: record.security_name for record in records}
+        await self._session.execute(
+            insert(Security).values([{"id": key, "name": value} for key, value in securities.items()])
+            .on_conflict_do_nothing(index_elements=[Security.id])
+        )
+        tickers = sorted(by_ticker)
         await self._session.execute(
             insert(Symbol)
             .values(
                 [
-                    {"ticker": ticker, "asset_type": "stock", "metadata_json": {}}
+                    {"ticker": ticker, "security_id": by_ticker[ticker],
+                     "asset_type": "stock", "metadata_json": {}}
                     for ticker in tickers
                 ]
             )
@@ -299,28 +341,73 @@ class UniverseRepository:
         )
         symbol_rows = (
             await self._session.execute(
-                select(Symbol.ticker, Symbol.id).where(Symbol.ticker.in_(tickers))
+                select(Symbol.ticker, Symbol.id, Symbol.security_id).where(Symbol.ticker.in_(tickers))
             )
         ).all()
+        for row in symbol_rows:
+            expected = by_ticker[row.ticker]
+            if row.security_id is not None and row.security_id != expected:
+                raise PITIdentityResolutionError(
+                    f"ticker {row.ticker} is already linked to a different security_id"
+                )
+            if row.security_id is None:
+                await self._session.execute(update(Symbol).where(Symbol.id == row.id).values(security_id=expected))
         symbol_ids = {row.ticker: row.id for row in symbol_rows}
         values = [
             {
                 "universe_id": universe_id,
                 "symbol_id": symbol_ids[record.ticker],
+                "security_id": record.security_id,
                 "valid_from": record.valid_from,
                 "valid_to": record.valid_to,
                 "source": record.source,
+                "source_confidence": record.source_confidence,
+                "provenance_json": record.provenance,
+                "eligibility_status": record.eligibility_status,
             }
             for record in records
         ]
         statement = insert(UniverseMembership).values(values)
         statement = statement.on_conflict_do_update(
-            constraint="uq_universe_membership_identity",
-            set_={"valid_to": statement.excluded.valid_to, "loaded_at": func.now()},
+            constraint="uq_universe_membership_security_identity",
+            set_={"symbol_id": statement.excluded.symbol_id,
+                  "valid_to": statement.excluded.valid_to,
+                  "source_confidence": statement.excluded.source_confidence,
+                  "provenance_json": statement.excluded.provenance_json,
+                  "eligibility_status": statement.excluded.eligibility_status,
+                  "loaded_at": func.now()},
         )
         result = await self._session.execute(statement)
         await self._session.commit()
         return result.rowcount or 0
+
+    @staticmethod
+    def _validated_membership_rows(rows, *, include_non_tradable: bool = False):
+        validated = []
+        for row in rows:
+            status = row.eligibility_status
+            if status == "EXPLICITLY_NON_TRADABLE_OR_INVALID":
+                if include_non_tradable:
+                    validated.append(row)
+                continue
+            if status != "ELIGIBLE":
+                raise PITIdentityResolutionError(
+                    f"PIT membership cannot be resolved safely (ticker={row.ticker}, status={status})"
+                )
+            if row.security_id is None:
+                raise PITIdentityResolutionError(
+                    f"PIT membership has no security_id (ticker={row.ticker})"
+                )
+            if row.symbol_security_id != row.security_id:
+                raise PITIdentityResolutionError(
+                    f"PIT symbol/security identity mismatch (ticker={row.ticker})"
+                )
+            validated.append(row)
+        return validated
+
+
+class PITIdentityResolutionError(RuntimeError):
+    """Raised when PIT membership cannot be mapped without ticker-based inference."""
 
 
 class OpportunityRepository:

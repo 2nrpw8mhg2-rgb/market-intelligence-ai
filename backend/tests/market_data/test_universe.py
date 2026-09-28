@@ -38,7 +38,7 @@ async def test_point_in_time_query_does_not_include_future_members() -> None:
             return [
                 ticker
                 for ticker, valid_from, valid_to in memberships
-                if valid_from <= as_of and (valid_to is None or valid_to >= as_of)
+                if valid_from <= as_of and (valid_to is None or as_of < valid_to)
             ]
 
     members = await SP500Universe(PointInTimeRepository()).members(date(2024, 6, 15))

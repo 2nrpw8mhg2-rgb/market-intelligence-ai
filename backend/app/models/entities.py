@@ -72,10 +72,10 @@ class UniverseMembership(TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint(
             "universe_id",
-            "symbol_id",
+            "security_id",
             "valid_from",
             "source",
-            name="uq_universe_membership_identity",
+            name="uq_universe_membership_security_identity",
         ),
         Index(
             "ix_universe_membership_period",
@@ -83,14 +83,22 @@ class UniverseMembership(TimestampMixin, Base):
             "valid_from",
             "valid_to",
         ),
+        Index(
+            "ix_universe_membership_security_period",
+            "universe_id", "security_id", "valid_from", "valid_to",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     universe_id: Mapped[int] = mapped_column(ForeignKey("universes.id", ondelete="CASCADE"))
     symbol_id: Mapped[int] = mapped_column(ForeignKey("symbols.id", ondelete="CASCADE"))
+    security_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("securities.id"))
     valid_from: Mapped[date] = mapped_column(Date)
     valid_to: Mapped[date | None] = mapped_column(Date)
     source: Mapped[str] = mapped_column(String(255))
+    source_confidence: Mapped[str] = mapped_column(String(16), default="UNRESOLVED")
+    provenance_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    eligibility_status: Mapped[str] = mapped_column(String(48), default="ELIGIBLE")
     loaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

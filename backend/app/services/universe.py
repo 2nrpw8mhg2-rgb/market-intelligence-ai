@@ -27,7 +27,10 @@ class UniverseImporter:
     async def import_sp500(self, records: list[MembershipImportRecord]) -> int:
         if not records:
             return 0
-        records = list(dict.fromkeys(records))
+        unique: dict[str, MembershipImportRecord] = {}
+        for record in records:
+            unique[record.model_dump_json()] = record
+        records = list(unique.values())
         self._reject_batch_contradictions(records)
         existing = await self._store.list_membership_records(
             UniverseName.SP500.value, {record.ticker for record in records}
@@ -37,10 +40,16 @@ class UniverseImporter:
 
     def _reject_batch_contradictions(self, records: list[MembershipImportRecord]) -> None:
         grouped: dict[str, list[MembershipImportRecord]] = defaultdict(list)
+        ticker_security: dict[str, object] = {}
         for record in records:
-            grouped[record.ticker].append(record)
-        for ticker, ticker_records in grouped.items():
-            self._validate_non_overlapping(ticker, ticker_records)
+            grouped[str(record.security_id)].append(record)
+            previous = ticker_security.setdefault(record.ticker, record.security_id)
+            if previous != record.security_id:
+                raise MembershipContradictionError(
+                    f"ticker {record.ticker} maps to multiple security identities"
+                )
+        for security_id, identity_records in grouped.items():
+            self._validate_non_overlapping(security_id, identity_records)
 
     def _reject_existing_contradictions(
         self,
@@ -49,14 +58,14 @@ class UniverseImporter:
     ) -> None:
         for new in incoming:
             for current in existing:
-                if new.ticker != current.ticker:
+                if new.security_id != current.security_id:
                     continue
                 same_identity = (
                     new.valid_from == current.valid_from and new.source == current.source
                 )
                 if not same_identity and self._overlaps(new, current):
                     raise MembershipContradictionError(
-                        f"overlapping membership intervals for {new.ticker}"
+                        f"overlapping membership intervals for security_id={new.security_id}"
                     )
 
     @classmethod
@@ -75,6 +84,6 @@ class UniverseImporter:
     @staticmethod
     def _overlaps(left: MembershipImportRecord, right: MembershipImportRecord) -> bool:
         max_date = date.max
-        return left.valid_from <= (right.valid_to or max_date) and right.valid_from <= (
+        return left.valid_from < (right.valid_to or max_date) and right.valid_from < (
             left.valid_to or max_date
         )

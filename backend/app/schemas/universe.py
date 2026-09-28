@@ -1,5 +1,7 @@
 import re
 from datetime import date
+import uuid
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -9,10 +11,17 @@ TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
 class MembershipImportRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    security_id: uuid.UUID
     ticker: str
+    security_name: str | None = None
     valid_from: date
     valid_to: date | None = None
     source: str
+    source_confidence: Literal["HIGH", "MEDIUM", "LOW", "UNRESOLVED"]
+    provenance: dict[str, Any]
+    eligibility_status: Literal[
+        "ELIGIBLE", "EXPLICITLY_NON_TRADABLE_OR_INVALID", "UNRESOLVED"
+    ] = "ELIGIBLE"
 
     @field_validator("ticker")
     @classmethod
@@ -32,9 +41,16 @@ class MembershipImportRecord(BaseModel):
 
     @model_validator(mode="after")
     def validate_interval(self) -> "MembershipImportRecord":
-        if self.valid_to is not None and self.valid_to < self.valid_from:
-            raise ValueError("valid_to must be on or after valid_from")
+        if self.valid_to is not None and self.valid_to <= self.valid_from:
+            raise ValueError("valid_to must be after valid_from (exclusive end)")
         return self
+
+    @field_validator("provenance")
+    @classmethod
+    def require_provenance(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not value:
+            raise ValueError("membership provenance is required")
+        return value
 
 
 class CurrentSnapshotImport(BaseModel):

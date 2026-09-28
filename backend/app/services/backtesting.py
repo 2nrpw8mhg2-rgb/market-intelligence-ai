@@ -3,11 +3,18 @@ from datetime import date
 from typing import Any
 
 from app.backtesting import BacktestEngine, canonical_config
-from app.database.repositories import BacktestRepository, MarketBarStore, UniverseRepository
+from app.database.repositories import (
+    BacktestRepository, MarketBarStore, PITIdentityResolutionError, UniverseRepository,
+)
 from app.market_data.calendar import NYSETradingCalendar
 from app.schemas.backtesting import (
     FIXED_UNIVERSE_WARNING, BacktestRequest, BacktestRunResult, UniverseMode,
 )
+
+
+def membership_is_active(periods: list[tuple[date, date | None]], session: date) -> bool:
+    """Return PIT eligibility for half-open membership intervals [start, end)."""
+    return any(start <= session and (end is None or session < end) for start, end in periods)
 
 
 class BacktestService:
@@ -54,8 +61,7 @@ class BacktestService:
             periods[record.ticker].append((record.valid_from, record.valid_to))
 
         def is_member(ticker: str, session: date) -> bool:
-            return any(start <= session and (end is None or end >= session)
-                       for start, end in periods.get(ticker, []))
+            return membership_is_active(periods.get(ticker, []), session)
 
         result = BacktestEngine(self.calendar).run(
             request, bars_by_ticker, benchmark_bars,
@@ -74,6 +80,7 @@ class BacktestService:
             records = await self.universes.list_period_memberships(
                 request.universe_identifier, request.start_date, request.end_date
             )
+            self._validate_pit_identities(records)
             if requested is not None:
                 requested_set = set(requested)
                 records = [record for record in records if record.ticker in requested_set]
@@ -84,3 +91,29 @@ class BacktestService:
         else:
             symbols = await self.universes.list_current_members(request.universe_identifier)
         return symbols, []
+
+    @staticmethod
+    def _validate_pit_identities(records) -> None:
+        ticker_identities: dict[str, object] = {}
+        identity_periods: dict[object, list[tuple[date, date | None]]] = defaultdict(list)
+        for record in records:
+            security_id = getattr(record, "security_id", None)
+            if security_id is None:
+                raise PITIdentityResolutionError(
+                    f"ticker-only PIT membership is forbidden (ticker={getattr(record, 'ticker', 'unknown')})"
+                )
+            if getattr(record, "eligibility_status", None) != "ELIGIBLE":
+                raise PITIdentityResolutionError(
+                    f"unresolved PIT membership is forbidden (security_id={security_id})"
+                )
+            previous = ticker_identities.setdefault(record.ticker, security_id)
+            if previous != security_id:
+                raise PITIdentityResolutionError(
+                    f"ticker reuse cannot be collapsed in PIT mode (ticker={record.ticker})"
+                )
+            for start, end in identity_periods[security_id]:
+                if record.valid_from < (end or date.max) and start < (record.valid_to or date.max):
+                    raise PITIdentityResolutionError(
+                        f"overlapping ticker aliases for security_id={security_id}"
+                    )
+            identity_periods[security_id].append((record.valid_from, record.valid_to))

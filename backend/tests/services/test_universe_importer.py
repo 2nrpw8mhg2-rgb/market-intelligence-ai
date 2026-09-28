@@ -1,4 +1,5 @@
 from datetime import date
+import uuid
 
 import pytest
 from pydantic import ValidationError
@@ -7,9 +8,13 @@ from app.schemas.universe import MembershipImportRecord
 from app.services.universe import MembershipContradictionError, UniverseImporter
 
 
-def record(start, end=None, ticker="AAPL", source="official-file"):
+SECURITY_A = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
+def record(start, end=None, ticker="AAPL", source="official-file", security_id=SECURITY_A):
     return MembershipImportRecord(
-        ticker=ticker, valid_from=start, valid_to=end, source=source
+        security_id=security_id, ticker=ticker, valid_from=start, valid_to=end,
+        source=source, source_confidence="HIGH", provenance={"fixture": "test"},
     )
 
 
@@ -49,6 +54,8 @@ def test_invalid_ticker_and_interval_are_rejected() -> None:
         record(date(2020, 1, 1), ticker="bad ticker")
     with pytest.raises(ValidationError, match="valid_to"):
         record(date(2020, 2, 1), date(2020, 1, 1))
+    with pytest.raises(ValidationError, match="exclusive end"):
+        record(date(2020, 1, 1), date(2020, 1, 1))
 
 
 @pytest.mark.asyncio
@@ -72,3 +79,33 @@ async def test_overlap_with_existing_membership_is_rejected() -> None:
         await UniverseImporter(store).import_sp500(
             [record(date(2020, 6, 1), None, source="second-source")]
         )
+
+
+@pytest.mark.asyncio
+async def test_adjacent_half_open_memberships_do_not_overlap() -> None:
+    store = Store()
+    importer = UniverseImporter(store)
+    records = [
+        record(date(2020, 1, 1), date(2020, 6, 1)),
+        record(date(2020, 6, 1), None, source="successor-interval"),
+    ]
+    assert await importer.import_sp500(records) == 2
+
+
+@pytest.mark.asyncio
+async def test_ticker_change_preserves_security_identity() -> None:
+    records = [
+        record(date(2020, 1, 1), date(2022, 6, 9), ticker="FB"),
+        record(date(2022, 6, 9), None, ticker="META", source="ticker-change"),
+    ]
+    assert await UniverseImporter(Store()).import_sp500(records) == 2
+
+
+@pytest.mark.asyncio
+async def test_ticker_reuse_cannot_collapse_two_security_id_values() -> None:
+    other = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    with pytest.raises(MembershipContradictionError, match="multiple security"):
+        await UniverseImporter(Store()).import_sp500([
+            record(date(2010, 1, 1), date(2015, 1, 1), ticker="ABC"),
+            record(date(2020, 1, 1), ticker="ABC", security_id=other),
+        ])
