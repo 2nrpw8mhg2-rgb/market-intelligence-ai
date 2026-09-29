@@ -5,7 +5,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
+# Historical provider aliases (for example INFO_OLD1) are preserved verbatim.
+# They are never accepted as identity: security_id remains mandatory for PIT.
+TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9._-]{0,15}$")
 
 
 class MembershipImportRecord(BaseModel):

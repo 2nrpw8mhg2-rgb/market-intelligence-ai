@@ -1,0 +1,43 @@
+{
+  "f1d1017f-ee00-54d7-976a-9f446a3814f0": {
+    "predecessor_override": "EQR",
+    "evidence": "VMRK carries ISIN US29476L1070, the stable identifier of the EQR branch. The simultaneous AVB->VMRK corporate event does not make AVB the same security and is excluded from this identity chain."
+  },
+  "9e2b69e4-e087-5752-9395-02b677ae8102": {
+    "classification": "RESOLVED_WITH_REPLACEMENT_IDENTITY",
+    "evidence": "The EODHD HistoricalTickerComponents row incorrectly resolves the 2026-01-05 spin-off membership to old Versant Corp. S&P DJI identifies the security moving to the S&P SmallCap 600 on 2026-01-06 as Versant Media Group Inc. (VSNT), spun off from S&P 500 constituent Comcast. SEC/issuer filings confirm regular-way Nasdaq trading began 2026-01-05. Old Versant Corp remains a separate security.",
+    "replacement_identity": {
+      "security_id": "9852cfda-78da-515f-bcda-6652a57bfd55",
+      "ticker": "VSNT",
+      "name": "Versant Media Group, Inc.",
+      "provider_symbol": "VSNT",
+      "confidence": "HIGH",
+      "identifiers": {
+        "CIK": "0002067876",
+        "CUSIP": "925283103",
+        "ISIN": "US9252831030",
+        "OpenFigi": "BBG01Y0M8K11"
+      },
+      "first_when_issued_trading_date": "2025-12-15",
+      "first_regular_trading_date": "2026-01-05",
+      "membership_valid_from": "2026-01-05",
+      "membership_valid_to": "2026-01-06",
+      "sources": [
+        "S&P DJI 2025-12-23 constituent announcement 1481212_cmcsa-vsnt-snv-546",
+        "Versant Media Group SEC 2026 Form 10-K, CIK 0002067876",
+        "Versant/Comcast 2026-01-05 spin-off completion releases",
+        "EODHD cached General and EOD responses for VSNT.US"
+      ]
+    }
+  },
+  "13256678-7f77-52fc-bd03-0bc03e53b96a": {
+    "preferred_price_provider": "eodhd_adjusted_derived",
+    "supplemental_price_provider": "massive",
+    "evidence": "Massive has a valid adjusted LUV daily aggregate for the sole EODHD gap on 2023-04-06. The security identity is unchanged."
+  },
+  "4eebb6ee-13b8-588c-8c90-5aaf4554ef62": {
+    "natural_unavailable_sessions": ["2023-03-13", "2023-03-14"],
+    "classification": "NATURAL_POSTHISTORY_LIMITATION",
+    "evidence": "Nasdaq halted SBNY at 04:00:01 ET on 2023-03-13 pending additional information; Signature Bank had been closed by NYSDFS on 2023-03-12 and placed into FDIC receivership. S&P DJI removed SBNY effective prior to the 2023-03-15 open. No regular-session bar is expected for 2023-03-13 or 2023-03-14."
+  }
+}

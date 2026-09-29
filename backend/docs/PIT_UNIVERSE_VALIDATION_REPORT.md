@@ -3,7 +3,7 @@
 **Research window:** 2021-09-27 through 2026-09-22
 **Calendar:** XNYS regular trading sessions (`exchange_calendars`)
 **Membership semantics:** entry inclusive, exit exclusive
-**Decision:** **READY_FOR_PIT_BACKTEST**
+**Decision:** **READY_FOR_PIT_EXECUTION**
 
 ## Executive conclusion
 
@@ -27,7 +27,8 @@ All session-level and structural checks passed; all 79 known historical exceptio
 | Sessions with a membership transition | 86 |
 | Additions observed inside window | 99 |
 | Removals observed inside window | 100 |
-| Deterministic reconstruction hash | `51c3041e7a1f8d11218dfa056d4171e51cf88c4947b2714e01a9e9af4287b5fd` |
+| Canonical deterministic reconstruction hash | `74d14b5198a7e64e91127abbbdcaae087e8c9134f6e8f6786446c210e2529b4d` |
+| Superseded pre-VSNT-correction hash | `51c3041e7a1f8d11218dfa056d4171e51cf88c4947b2714e01a9e9af4287b5fd` |
 
 ## Boundary and identity rules
 
@@ -52,15 +53,16 @@ All session-level and structural checks passed; all 79 known historical exceptio
 | TICKER_REUSE_ELIGIBLE | 0 |
 | ENTRY_BOUNDARY_VIOLATION | 0 |
 | EXIT_BOUNDARY_VIOLATION | 0 |
-| EXPLICIT_NON_TRADABLE_RECORD | 1 |
+| EXPLICIT_NON_TRADABLE_RECORD | 2 |
 
-Total findings: **1**; blocking anomalies: **0**.
+Total findings: **2**; blocking anomalies: **0**.
 
 ### Anomaly details
 
 | Category | Ticker | security_id | Affected sessions | Exact evidence required |
 |---|---|---|---|---|
 | EXPLICIT_NON_TRADABLE_RECORD | MRP_OLD | 6d107392-1574-5d84-9836-defb4f684946 | 2025-01-21–2025-02-07 (14 sessions) | none; retained as an explicit audited exclusion |
+| EXPLICIT_NON_TRADABLE_RECORD | VSNT_OLD | 9e2b69e4-e087-5752-9395-02b677ae8102 | 2026-01-05 (1 session) | none; provider misidentification retained for audit after replacement by proven Versant Media Group identity |
 
 ## Unresolved exceptions
 
@@ -98,8 +100,8 @@ Additions/removals are differences from the immediately preceding XNYS session. 
 | 2025-02-07 | 503 | — | — | EXPLICIT_NON_TRADABLE_RECORD:MRP_OLD |
 | 2025-02-10 | 503 | — | — | — |
 | 2026-01-02 | 503 | — | — | — |
-| 2026-01-05 | 504 | VSNT_OLD | — | — |
-| 2026-01-06 | 503 | — | VSNT_OLD | — |
+| 2026-01-05 | 504 | VSNT | — | VSNT_OLD retained audit-only |
+| 2026-01-06 | 503 | — | VSNT | — |
 | 2026-09-18 | 503 | — | — | — |
 | 2026-09-21 | 503 | BE, ILMN, P | BLDR, TAP, TTD | — |
 | 2026-09-22 | 503 | — | — | — |
@@ -110,6 +112,11 @@ The runtime `UniverseMembership` and import/query path is keyed authoritatively 
 
 ## Readiness decision
 
-**READY_FOR_PIT_BACKTEST**
+**READY_FOR_PIT_EXECUTION**
 
-All session-level and structural checks passed; all 79 known historical exceptions exit before the research window and are never eligible. Readiness is limited to universe reconstruction for 2021-09-27 through 2026-09-22; this validation does not authorize a wider historical window and did not execute the PIT backtest.
+All session-level and structural checks passed. The former VSNT provider
+misidentification is retained audit-only and replaced by the proven Versant
+Media Group identity on the same unchanged half-open interval. The corrected
+canonical hash is `74d14b5198a7e64e91127abbbdcaae087e8c9134f6e8f6786446c210e2529b4d`.
+Readiness is limited to 2021-09-27 through 2026-09-22; this validation does not
+authorize a wider historical window and did not execute the PIT backtest.

@@ -75,6 +75,25 @@ class MarketBarRepository:
             for row in rows
         ]
 
+    async def list_security_daily_bars(
+        self, security_id: uuid.UUID, ticker: str, start_date: date | None = None,
+        end_date: date | None = None, *, providers: tuple[str, ...] = ("massive", "eodhd_adjusted_derived"),
+    ) -> tuple[str | None, list[MarketBar]]:
+        """Resolve bars through security identity; never fall back to ticker alone."""
+        symbol = (await self._session.execute(
+            select(Symbol.id, Symbol.security_id)
+            .where(Symbol.ticker == ticker.strip().upper())
+        )).one_or_none()
+        if symbol is None or symbol.security_id != security_id:
+            raise PITIdentityResolutionError(
+                f"market-data alias is not linked to the requested security_id (ticker={ticker})"
+            )
+        for provider in providers:
+            bars = await self.list_daily_bars(ticker, start_date, end_date, provider)
+            if bars:
+                return provider, bars
+        return None, []
+
     async def upsert_daily_bars(
         self, bars: list[MarketBar], *, provider: str
     ) -> int:
@@ -107,21 +126,24 @@ class MarketBarRepository:
             }
             for bar in bars
         ]
-        statement = insert(MarketBarRecord).values(values)
-        statement = statement.on_conflict_do_update(
-            constraint="uq_market_bars_identity",
-            set_={
-                "open": statement.excluded.open,
-                "high": statement.excluded.high,
-                "low": statement.excluded.low,
-                "close": statement.excluded.close,
-                "volume": statement.excluded.volume,
-                "updated_at": func.now(),
-            },
-        )
-        result = await self._session.execute(statement)
+        affected = 0
+        for chunk in _chunks(values):
+            statement = insert(MarketBarRecord).values(chunk)
+            statement = statement.on_conflict_do_update(
+                constraint="uq_market_bars_identity",
+                set_={
+                    "open": statement.excluded.open,
+                    "high": statement.excluded.high,
+                    "low": statement.excluded.low,
+                    "close": statement.excluded.close,
+                    "volume": statement.excluded.volume,
+                    "updated_at": func.now(),
+                },
+            )
+            result = await self._session.execute(statement)
+            affected += result.rowcount or 0
         await self._session.commit()
-        return result.rowcount or 0
+        return affected
 
     async def daily_bar_diagnostics(
         self, ticker: str, start_date: date, end_date: date, *, provider: str

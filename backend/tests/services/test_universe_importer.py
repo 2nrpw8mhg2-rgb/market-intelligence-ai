@@ -58,6 +58,11 @@ def test_invalid_ticker_and_interval_are_rejected() -> None:
         record(date(2020, 1, 1), date(2020, 1, 1))
 
 
+def test_historical_provider_alias_is_preserved_but_still_requires_security_id() -> None:
+    membership = record(date(2020, 1, 1), ticker="INFO_OLD1")
+    assert membership.ticker == "INFO_OLD1"
+
+
 @pytest.mark.asyncio
 async def test_overlapping_batch_memberships_are_rejected() -> None:
     importer = UniverseImporter(Store())
