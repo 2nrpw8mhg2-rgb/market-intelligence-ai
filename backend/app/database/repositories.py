@@ -1,6 +1,6 @@
 from datetime import UTC, date, datetime, time
 import uuid
-from typing import Protocol
+from typing import Any, Protocol
 
 from sqlalchemy import Select, and_, delete as sa_delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -623,9 +623,15 @@ class PortfolioRepository:
         tickers = {item.ticker for item in result.trades} | {item.ticker for item in result.skipped_signals}
         symbol_rows = (await self._session.execute(select(Symbol.ticker, Symbol.id).where(Symbol.ticker.in_(tickers)))).all() if tickers else []
         symbol_ids = {row.ticker: row.id for row in symbol_rows}
+        def identity(item) -> dict[str, Any]:
+            security_id = uuid.UUID(item.security_id) if item.security_id else None
+            symbol_id = symbol_ids.get(item.ticker)
+            if security_id is None and symbol_id is None:
+                raise ValueError(f"portfolio ledger identity unresolved: {item.ticker}")
+            return {"security_id": security_id, "symbol_id": symbol_id}
         if result.trades:
             values = [{
-                "portfolio_run_id": run_id, "symbol_id": symbol_ids[item.ticker],
+                "portfolio_run_id": run_id, **identity(item),
                 "signal_date": item.signal_date, "entry_date": item.entry_date,
                 "exit_date": item.exit_date, "score": item.score,
                 "details": item.model_dump(mode="json"),
@@ -641,7 +647,7 @@ class PortfolioRepository:
                 await self._session.execute(insert(PortfolioDailyEquity).values(batch))
         if result.skipped_signals:
             values = [{
-                "portfolio_run_id": run_id, "symbol_id": symbol_ids[item.ticker],
+                "portfolio_run_id": run_id, **identity(item),
                 "signal_date": item.signal_date, "reason": item.reason,
                 "details": item.model_dump(mode="json"),
             } for item in result.skipped_signals]

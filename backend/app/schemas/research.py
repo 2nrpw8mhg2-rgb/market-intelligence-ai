@@ -64,6 +64,7 @@ class PortfolioSimulationRequest(BaseModel):
     slippage_bps: float = Field(default=5, ge=0)
     selection_policy: SelectionPolicy = SelectionPolicy.HIGHEST_SCORE_FIRST
     benchmark: str = "SPY"
+    security_id_native: bool = False
 
     @model_validator(mode="after")
     def capacity_is_valid(self) -> "PortfolioSimulationRequest":
@@ -73,7 +74,9 @@ class PortfolioSimulationRequest(BaseModel):
 
 
 class PortfolioTradeResult(BaseModel):
+    security_id: str | None = None
     ticker: str
+    provenance: str | None = None
     signal_date: date
     entry_date: date
     exit_date: date
@@ -83,13 +86,33 @@ class PortfolioTradeResult(BaseModel):
     entry_price: float
     reference_exit_price: float
     exit_price: float
+    exit_value: float = 0
     gross_return: float
     net_return: float
     pnl: float
     commission: float
     slippage_cost: float
+    entry_slippage_cost: float = 0
+    exit_slippage_cost: float = 0
     holding_sessions: int
     exit_reason: str = "TIME_EXIT"
+    lifecycle_treatment: str | None = None
+    slot_release_date: date | None = None
+
+
+class PortfolioEntryResult(BaseModel):
+    security_id: str
+    ticker: str
+    provenance: str | None = None
+    signal_date: date
+    entry_date: date
+    score: float
+    reference_entry_price: float
+    entry_price: float
+    quantity: float
+    position_size: float
+    entry_slippage_cost: float
+    scheduled_exit_date: date
 
 
 class PortfolioDailyResult(BaseModel):
@@ -103,10 +126,16 @@ class PortfolioDailyResult(BaseModel):
     cumulative_return: float
     open_positions: int
     benchmark_equity: float | None
+    available_slots: int = 0
+    entries: list[str] = Field(default_factory=list)
+    exits: list[str] = Field(default_factory=list)
+    drawdown: float = 0
 
 
 class SkippedSignalResult(BaseModel):
+    security_id: str | None = None
     ticker: str
+    provenance: str | None = None
     signal_date: date
     entry_date: date | None
     score: float
@@ -117,7 +146,7 @@ class PortfolioSimulationResult(BaseModel):
     run_id: str
     config_hash: str
     source_backtest_run_id: str
-    warning: str = FIXED_UNIVERSE_WARNING
+    warning: str | None = FIXED_UNIVERSE_WARNING
     strategy_version: str
     universe_mode: str
     start_date: date
@@ -125,6 +154,7 @@ class PortfolioSimulationResult(BaseModel):
     configuration: dict[str, Any]
     metrics: dict[str, Any]
     benchmark_metrics: dict[str, Any]
+    entries: list[PortfolioEntryResult] = Field(default_factory=list)
     trades: list[PortfolioTradeResult]
     daily_equity: list[PortfolioDailyResult]
     skipped_signals: list[SkippedSignalResult]

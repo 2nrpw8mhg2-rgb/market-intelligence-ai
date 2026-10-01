@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Date, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -302,10 +302,15 @@ class PortfolioSimulationRun(TimestampMixin, Base):
 
 class PortfolioTradeRecord(TimestampMixin, Base):
     __tablename__ = "portfolio_trades"
-    __table_args__ = (Index("ix_portfolio_trades_run_entry", "portfolio_run_id", "entry_date"),)
+    __table_args__ = (
+        Index("ix_portfolio_trades_run_entry", "portfolio_run_id", "entry_date"),
+        CheckConstraint("symbol_id IS NOT NULL OR security_id IS NOT NULL",
+                        name="ck_portfolio_trade_identity"),
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     portfolio_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("portfolio_simulation_runs.id", ondelete="CASCADE"))
-    symbol_id: Mapped[int] = mapped_column(ForeignKey("symbols.id"))
+    symbol_id: Mapped[int | None] = mapped_column(ForeignKey("symbols.id"))
+    security_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("securities.id"), index=True)
     signal_date: Mapped[date] = mapped_column(Date)
     entry_date: Mapped[date] = mapped_column(Date)
     exit_date: Mapped[date] = mapped_column(Date)
@@ -324,10 +329,15 @@ class PortfolioDailyEquity(TimestampMixin, Base):
 
 class PortfolioSkippedSignal(TimestampMixin, Base):
     __tablename__ = "portfolio_skipped_signals"
-    __table_args__ = (Index("ix_portfolio_skipped_run_reason", "portfolio_run_id", "reason"),)
+    __table_args__ = (
+        Index("ix_portfolio_skipped_run_reason", "portfolio_run_id", "reason"),
+        CheckConstraint("symbol_id IS NOT NULL OR security_id IS NOT NULL",
+                        name="ck_portfolio_skipped_identity"),
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     portfolio_run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("portfolio_simulation_runs.id", ondelete="CASCADE"))
-    symbol_id: Mapped[int] = mapped_column(ForeignKey("symbols.id"))
+    symbol_id: Mapped[int | None] = mapped_column(ForeignKey("symbols.id"))
+    security_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("securities.id"), index=True)
     signal_date: Mapped[date] = mapped_column(Date)
     reason: Mapped[str] = mapped_column(String(64))
     details: Mapped[dict[str, Any]] = mapped_column(JSON)

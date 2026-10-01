@@ -1201,3 +1201,231 @@ introduced.
 **READY_FOR_PHASE_3**
 
 This is a readiness conclusion only. Phase 3 was not started.
+
+## 42. PHASE 3A — PORTFOLIO ENGINE VALIDATION
+
+### 42.1 Scope and unchanged Phase 2 preflight
+
+Phase 3A validates mechanics and accounting only. Neither the primary
+FIXED_REBUILT portfolio nor the primary PIT portfolio was executed. No new total
+return, CAGR, Sharpe, Sortino, Calmar, or cross-universe portfolio result was
+calculated.
+
+The approved Phase 2 state remained unchanged:
+
+| Check | Value |
+|---|---|
+| Canonical PIT hash | `74d14b5198a7e64e91127abbbdcaae087e8c9134f6e8f6786446c210e2529b4d` |
+| Phase 2 analytical digest | `ed33baca754eb93a6cbe6c898037e9eb8c5734f2762aeb3d8f3d821fdf5cf814` |
+| Phase 2 artefact SHA-256 | `e86c01a3f90573b628d4b9f5096515df80eeeab09684d98f00056d6512084bfc` |
+| FIXED_REBUILT signals | 5,896 |
+| PIT signals / executable / non-executable | 5,398 / 5,395 / 3 |
+| BOTH / FIXED_ONLY / PIT_ONLY | 5,118 / 778 / 277 |
+
+The reconciliations remain 5,118 + 778 = 5,896; 5,118 + 277 = 5,395;
+and 5,395 + 3 = 5,398. All five approved Phase 2 gates remain `PASS`.
+
+### 42.2 Existing engine and PIT identity changes
+
+The main implementation is `app/portfolio/engine.py`; request/result contracts
+are in `app/schemas/research.py`, persistence is in
+`app/database/repositories.py`, and the existing command adapter is
+`app/cli/run_portfolio_simulation.py`.
+
+The Phase 6 engine is a deterministic, long-only, fractional-share session
+simulator. It groups executable signals by entry date, selects candidates at
+the open, holds positions in an identity-keyed map, marks and exits at the
+close, then writes a daily equity observation.
+
+The old implementation used the field named `ticker` as position identity and
+as its final ordering tie-break. Phase 3A introduces explicit
+`security_id_native` validation. In that mode the legacy event carrier must
+contain a valid UUID security identity; a ticker alias is rejected rather than
+used as fallback. Positions, bars, lifecycle policies and ordering are keyed by
+that `security_id`. Historical ticker remains display metadata. Portfolio trade
+and skipped-signal persistence now supports a direct `security_id` FK through
+Alembic revision `20261001_0010` (head); legacy `symbol_id` remains nullable for
+backward compatibility and a check constraint requires at least one identity.
+
+### 42.3 Candidate ordering and score
+
+The complete ordering tuples are:
+
+- `HIGHEST_SCORE_FIRST`: `(-score, security_id)`.
+- `DETERMINISTIC_UNRANKED_BASELINE`: `(security_id,)`.
+
+The security-id fallback was required because the existing final tie-break was
+ticker. No ticker final identity fallback remains in security-id-native mode.
+
+The score implementation remains security-local. The Phase 2 BOTH audit still
+shows exact equality for all 5,118 shared executable events. A new structural
+validator fails if any shared `(security_id, signal_date)` score differs.
+
+**PORTFOLIO_ORDERING_DETERMINISM = PASS**
+
+**PORTFOLIO_SCORE_INVARIANT = PASS**
+
+### 42.4 Position sizing and capacity
+
+For each accepted signal, target notional is the lesser of
+`previous_end_of_session_equity × target_allocation` and
+`previous_end_of_session_equity × maximum_exposure`, then capped by affordable
+cash after commission. Under the locked specification this is a fixed 10%
+target based on the previous XNYS close equity. Fractional shares are allowed.
+
+Maximum concurrent positions is 10. Cash affordability prevents borrowing;
+cash is asserted not to become materially negative. Duplicate simultaneous
+positions are prohibited by `security_id`; a later signal for an already-held
+security is explicitly rejected.
+
+**POSITION_SIZING_RULE = previous-close equity × 10%, capped by cash**
+
+**POSITION_SIZING_EQUITY_BASIS = previous XNYS end-of-session equity**
+
+### 42.5 Session counting and order of operations
+
+The entry session is `signal_date + 1 XNYS session` and entry occurs at OPEN.
+Entry day is holding session 1. Scheduled exit is
+`signal_date + 20 XNYS sessions` at CLOSE, so the inclusive entry-to-exit count
+is 20 sessions. This is the same target close used by the approved Phase 2 20d
+NEXT_OPEN outcome.
+
+**PHASE2_20D_ALIGNMENT = PASS**
+
+Within each session the engine performs:
+
+1. carry prior-close cash and positions;
+2. determine open capacity before any same-day close exit;
+3. sort open candidates and reject duplicates/capacity failures;
+4. execute NEXT_OPEN entries with 5 bp adverse slippage;
+5. debit position notional and any commission from cash;
+6. require same-security close marks for ordinary open positions;
+7. process explicit lifecycle exits at CLOSE;
+8. process scheduled 20-session exits at CLOSE;
+9. apply 5 bp adverse exit slippage, except zero-valued bankruptcy;
+10. credit realized proceeds at CLOSE and remove exited positions;
+11. calculate close market value, equity and drawdown;
+12. persist the end-of-session ledger row.
+
+An exit at session `t` occurs after that session's entries. Its cash and slot
+are available for selection only at the next XNYS OPEN.
+
+**SLOT_RELEASE_CONVENTION = next XNYS session**
+
+**CASH_AVAILABILITY_CONVENTION = credited at CLOSE, usable next XNYS OPEN**
+
+### 42.6 Index removal and lifecycle treatment
+
+The engine receives no membership-exit instruction after a valid entry.
+Therefore index removal cannot close a position. Same-security post-membership
+bars remain valid for marking and scheduled exit. This is covered by a
+regression test spanning a hypothetical removal boundary.
+
+**INDEX_REMOVAL_POSITION_INVARIANT = PASS**
+
+The previous engine had no lifecycle rule, so Phase 3A implements the approved
+pre-registered fallback:
+
+| Reason | Treatment |
+|---|---|
+| ACQUISITION | Explicit last legitimate same-security close, less 5 bp exit slippage |
+| MERGER | Explicit last legitimate same-security close, less 5 bp exit slippage |
+| DELISTING_OTHER | Explicit last legitimate same-security close, less 5 bp exit slippage |
+| BANKRUPTCY | Terminal value zero, -100% gross return, zero recovery, no exit slippage |
+
+Cash is credited on the configured lifecycle exit session and the slot is
+released for the next XNYS session. The engine fails closed if the specified
+last legitimate same-security close is absent. It cannot substitute a
+successor, OTC series, consideration value, synthetic value, interpolated bar,
+or forward-filled mark.
+
+**PORTFOLIO_LIFECYCLE_RULE = PRE_REGISTERED_FALLBACK**
+
+### 42.7 Non-executable and bankruptcy preflight
+
+Signals with no legitimate NEXT_OPEN are now retained as
+`NON_EXECUTABLE_LIFECYCLE_TERMINATION` rejections and cannot become positions.
+The approved PIT cases remain TWTR, DAY and HOLX.
+
+**NON_EXECUTABLE_ENTRY_INVARIANT = PASS**
+
+The approved bankruptcy audit remains unchanged: FRC has zero PIT signals,
+SBNY has zero PIT signals, and SIVB has two executable signals, both more than
+60 sessions before termination. Consequently none can structurally remain open
+at termination under the locked 20-session rule. There are no other relevant
+bankruptcy signals in the approved set. The zero-value bankruptcy rule remains
+implemented for any future qualifying position.
+
+### 42.8 Research-window end and accounting
+
+The existing end rule is preserved: no forced liquidation occurs on the final
+research session. A position with a later scheduled exit remains open, is
+marked at the final legitimate same-security close, and is reported in
+`open_positions_at_research_end`. It is not converted into a completed trade.
+
+**RESEARCH_WINDOW_END_RULE = no forced liquidation; final legitimate close mark**
+
+Tests establish on every synthetic session that `equity = cash + market value`,
+cash is not materially negative, open positions never exceed 10, entries and
+exits reconcile, no position disappears silently, duplicate identities are
+rejected, and slippage is charged exactly once per applicable side. Missing
+same-security marks fail closed. Bankruptcy at zero receives no exit slippage.
+
+**PORTFOLIO_ACCOUNTING_INVARIANTS = PASS**
+
+### 42.9 Frozen performance-metric conventions
+
+The existing formulas are documented but were not applied to either primary
+portfolio in Phase 3A:
+
+- CAGR: `(ending equity / initial capital)^(1 / calendar years) - 1`, where
+  calendar years is elapsed calendar days divided by 365.25; omitted for spans
+  shorter than one year or non-positive ending equity.
+- Volatility: sample standard deviation of daily returns × `sqrt(252)`.
+- Sharpe: mean daily return / sample standard deviation × `sqrt(252)`;
+  risk-free rate is 0.
+- Sortino: annualized mean daily return divided by downside deviation, where
+  downside deviation is `sqrt(mean(min(daily return, 0)^2)) × sqrt(252)`;
+  minimum acceptable return is 0.
+- Calmar: CAGR divided by absolute maximum drawdown.
+
+No historical risk-free-rate series was introduced.
+
+**PERFORMANCE_METRIC_CONVENTIONS = DOCUMENTED**
+
+### 42.10 Path policy and ledger capability
+
+Phase 3B will produce one deterministic historical path. Phase 3A ran no
+alternative start dates, offsets, randomized order, randomized tie-break,
+Monte Carlo ordering, or other path-robustness experiment. Such work requires a
+separate future pre-registration.
+
+The validated result contract can record accepted signals and explicit
+rejections; BOTH/FIXED_ONLY/PIT_ONLY provenance; security ID and historical
+ticker; signal, entry, scheduled-exit, actual-exit and slot-release dates;
+reference/executed prices; quantity and position size; lifecycle treatment;
+gross/net return and dollar P&L; entry/exit slippage; and exit cash value.
+
+Each session row records equity, cash, market value, positions, available slots,
+entry IDs, exit IDs and drawdown. The JSON metadata preserves these ledgers;
+trade and rejection tables now persist `security_id` directly.
+
+**PHASE3_LEDGER_CAPABILITY = PASS**
+
+### 42.11 Tests and completion gate
+
+The complete suite passes: **255 passed, 0 failed**, 22 tests added relative to
+the approved 233-test baseline. The single unchanged external Starlette/httpx
+deprecation warning remains informational. Alembic head is
+`20261001_0010`.
+
+No primary portfolio was run and no new portfolio financial result appears in
+this section. Strategy, score, holding period, maximum positions and slippage
+remain unchanged. No optimization, M&A exclusion, bankruptcy exclusion,
+synthetic price, interpolation, forward-fill or successor substitution was
+introduced.
+
+**READY_FOR_PHASE_3B**
+
+This status is a structural readiness conclusion only. Phase 3B was not
+started, and no commit, tag or push was created.
