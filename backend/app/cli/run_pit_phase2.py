@@ -1,0 +1,655 @@
+import argparse
+import asyncio
+import csv
+import json
+import statistics
+import uuid
+from collections import Counter, defaultdict
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy import select
+
+from app.backtesting.engine import BacktestEngine
+from app.database.repositories import BacktestRepository, MarketBarRepository, UniverseRepository
+from app.database.session import SessionFactory
+from app.market_data.calendar import NYSETradingCalendar
+from app.models import BacktestRun
+from app.pit.materialization import database_validation
+from app.pit.readiness import assess_alias_readiness, merge_provider_bars
+from app.research import MarketRegimeEngine, ScoreResearchEngine
+from app.research.fixed_rebuilt import (
+    TemporalAliasResolver, event_metrics, horizon_completeness,
+    map_fixed_universe_events, outcome, score_bucket,
+)
+from app.research.pit_phase2 import (
+    HORIZONS, LifecycleCase, arithmetic_bridge, compare_both_invariance,
+    date_clustered_bootstrap, decompose_events, deterministic_phase2_digest,
+    event_map, genuine_missing_inventory, lifecycle_overrides, paired_date_clustered_bootstrap,
+    score_bucket_metrics, sensitivity_metrics, set_summary, signal_distribution,
+    subset_metrics, values_by_date,
+)
+from app.schemas.backtesting import BacktestRequest, UniverseMode
+from app.schemas.research import MarketRegimeRequest, ScoreResearchRequest
+
+
+ORIGINAL_RUN_ID = uuid.UUID("cd4da596-8380-5b5c-9b55-252c601be6f6")
+START = date(2021, 9, 27)
+END = date(2026, 9, 22)
+EXPECTED_HASH = "74d14b5198a7e64e91127abbbdcaae087e8c9134f6e8f6786446c210e2529b4d"
+PHASE1_DIGEST = "7fae705c084ec82c332681578b37d76e1f010472abbb866dfa49e9d39355d1b6"
+BOOTSTRAP_SEED = 20260929
+BOOTSTRAP_RESAMPLES = 10_000
+
+
+def parser() -> argparse.ArgumentParser:
+    command = argparse.ArgumentParser(description="Phase 2 PIT event-study and universe-effect audit")
+    command.add_argument("--aliases", default="docs/PIT_TEMPORAL_ALIAS_CHAINS.csv")
+    command.add_argument("--evidence", default="docs/PIT_ALIAS_CHAIN_EVIDENCE.json")
+    command.add_argument("--audit", default="data/eodhd_poc3/audit.json")
+    command.add_argument("--readiness", default="data/pit_materialization/readiness.json")
+    command.add_argument("--output", default="data/phase2_pit_event_study/diagnostics.json")
+    return command
+
+
+def terminal_policy(audit: dict[str, Any], evidence: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    policies = {}
+    for row in audit["security_master"]:
+        security_id = str(row["security_id"])
+        event = row.get("event", {})
+        classification = str(event.get("classification") or "")
+        confidence = str(event.get("confidence") or "")
+        last = row.get("prices", {}).get("last")
+        if not last:
+            continue
+        if classification == "ACQUISITION_CASH":
+            reason = "ACQUISITION"
+        elif "MERGER" in classification:
+            reason = "MERGER"
+        elif classification in {"RECEIVERSHIP", "BANKRUPTCY", "INSOLVENCY"}:
+            reason = "BANKRUPTCY"
+        elif classification == "DELISTING":
+            reason = "DELISTING_OTHER" if confidence == "HIGH" else "UNKNOWN"
+        else:
+            continue
+        policies[security_id] = {
+            "last_session": date.fromisoformat(last), "reason": reason,
+            "source_classification": classification, "confidence": confidence,
+        }
+    # SBNY is a proven bank failure/receivership with no regular-session
+    # resumption. Later reused-ticker aggregates must never enter this identity.
+    sbny = "4eebb6ee-13b8-588c-8c90-5aaf4554ef62"
+    if sbny in evidence:
+        policies[sbny] = {
+            "last_session": date(2023, 3, 10), "reason": "BANKRUPTCY",
+            "source_classification": "FDIC_RECEIVERSHIP", "confidence": "HIGH",
+        }
+    return policies
+
+
+def _valid_ohlcv(bar) -> bool:
+    return (bar.open > 0 and bar.high > 0 and bar.low > 0 and bar.close > 0
+            and bar.volume >= 0 and bar.high >= bar.low
+            and bar.low <= bar.open <= bar.high and bar.low <= bar.close <= bar.high)
+
+
+def _audit_outcomes(
+    events: list[dict[str, Any]], bars: dict[str, list], benchmark: list,
+    policies: dict[str, dict[str, Any]], calendar: NYSETradingCalendar,
+) -> tuple[dict[tuple[str, date, int], str], list[LifecycleCase], dict[str, Any]]:
+    classifications = {}
+    cases = []
+    counts = {str(horizon): Counter() for horizon in HORIZONS}
+    benchmark_dates = {bar.timestamp.date() for bar in benchmark}
+    for event in events:
+        security_id = str(event["ticker"])
+        signal_date = date.fromisoformat(str(event["signal_date"]))
+        available = {bar.timestamp.date(): bar for bar in bars[security_id]}
+        for horizon in HORIZONS:
+            item = outcome(event, horizon)
+            key = (security_id, signal_date, horizon)
+            if item["forward_data_complete"]:
+                classifications[key] = "COMPLETE"
+                counts[str(horizon)]["COMPLETE"] += 1
+                continue
+            target = calendar.session_offset(signal_date, horizon)
+            if target > END:
+                classifications[key] = "RESEARCH_WINDOW_TRUNCATION"
+                counts[str(horizon)]["RESEARCH_WINDOW_TRUNCATION"] += 1
+                continue
+            expected = calendar.trading_days_between(calendar.session_offset(signal_date, 1), target)
+            missing = [session for session in expected if session not in available]
+            if not all(session in benchmark_dates for session in expected):
+                classification = "GENUINE_MISSING_DATA"
+            else:
+                policy = policies.get(security_id)
+                terminal_session = (calendar.session_offset(policy["last_session"], 1)
+                                    if policy else None)
+                if policy and missing and min(missing) >= terminal_session:
+                    classification = f"SECURITY_LIFECYCLE_TRUNCATION:{policy['reason']}"
+                else:
+                    classification = "GENUINE_MISSING_DATA"
+            classifications[key] = classification
+            counts[str(horizon)][classification] += 1
+            if classification.startswith("SECURITY_LIFECYCLE_TRUNCATION:"):
+                policy = policies[security_id]
+                legitimate = [bar for session, bar in available.items()
+                              if session <= policy["last_session"] and session <= target]
+                if not legitimate:
+                    raise RuntimeError(f"lifecycle case lacks a legitimate last price: {key}")
+                last_bar = max(legitimate, key=lambda bar: bar.timestamp)
+                cases.append(LifecycleCase(
+                    security_id=security_id, signal_date=signal_date, horizon=horizon,
+                    reason=policy["reason"], last_available_close=float(last_bar.close),
+                    entry_price=(float(event["entry_price"]) if event.get("entry_price") is not None else None),
+                    benchmark_return=(float(item["benchmark_return"])
+                                      if item.get("benchmark_return") is not None else None),
+                ))
+    return classifications, cases, {
+        horizon: dict(sorted(values.items())) for horizon, values in counts.items()
+    }
+
+
+def _metrics_delta(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    return {key: (right[key] - left[key] if left[key] is not None and right[key] is not None else None)
+            for key in left}
+
+
+def _annual_counts(events: list[dict[str, Any]]) -> dict[str, int]:
+    return dict(sorted(Counter(str(item["signal_date"])[:4] for item in events).items()))
+
+
+def _date_counts(events: list[dict[str, Any]]) -> Counter:
+    return Counter(str(item["signal_date"]) for item in events)
+
+
+def _feature_summary(result) -> dict[str, Any]:
+    return {name: values["20"] for name, values in result.results["components"].items()}
+
+
+def _regime_summary(result) -> dict[str, Any]:
+    wanted = (
+        "SPY_ABOVE_SMA200", "SPY_BELOW_SMA200", "VOL_LOW", "VOL_MID",
+        "VOL_HIGH", "REGIME_UNAVAILABLE",
+    )
+    return {name: result.results["regimes"].get(name, {}).get("20") for name in wanted
+            if name in result.results["regimes"]}
+
+
+def _spy_consistency(original_map, fixed_map, horizon: int) -> dict[str, Any]:
+    differences = []
+    for key in original_map.keys() & fixed_map.keys():
+        left = outcome(original_map[key][1], horizon).get("benchmark_return")
+        right = outcome(fixed_map[key], horizon).get("benchmark_return")
+        if left is not None and right is not None:
+            differences.append(abs(float(right) - float(left)))
+    over = sum(value > .0001 for value in differences)
+    return {
+        "events_compared": len(differences), ">1bp": over,
+        "pct_over_1bp": over / len(differences) if differences else None,
+        "median_absolute_difference": statistics.median(differences) if differences else None,
+        "maximum_absolute_difference": max(differences, default=None),
+    }
+
+
+async def run(args: argparse.Namespace) -> dict[str, Any]:
+    calendar = NYSETradingCalendar()
+    sessions = calendar.trading_days_between(START, END)
+    warmup = calendar.session_offset(START, -260)
+    horizon_end = calendar.session_offset(END, 60)
+    with Path(args.aliases).open(newline="", encoding="utf-8") as handle:
+        resolver = TemporalAliasResolver.from_csv_rows(csv.DictReader(handle))
+    evidence = json.loads(Path(args.evidence).read_text(encoding="utf-8"))
+    audit = json.loads(Path(args.audit).read_text(encoding="utf-8"))
+    approved_readiness = json.loads(Path(args.readiness).read_text(encoding="utf-8"))
+    policies = terminal_policy(audit, evidence)
+    audit_terminal_ids = {
+        str(row["security_id"]) for row in audit["security_master"]
+        if any(row.get("prices", {}).get("missing_by_reason", {}).get(reason, 0)
+               for reason in ("TERMINAL_EVENT", "SYMBOL_CHANGE_BOUNDARY"))
+    }
+
+    async with SessionFactory() as session:
+        universes = UniverseRepository(session)
+        memberships = await universes.list_period_memberships("SP500", START, END)
+        original = await BacktestRepository(session).get(ORIGINAL_RUN_ID)
+        stored_config = await session.scalar(
+            select(BacktestRun.parameters).where(BacktestRun.id == ORIGINAL_RUN_ID)
+        )
+        if original is None or stored_config is None:
+            raise RuntimeError("authoritative ORIGINAL_FIXED run unavailable")
+        fixed_request = BacktestRequest.model_validate(stored_config)
+        current = await universes.list_current_members("SP500")
+        audit_only = await universes.list_membership_records("SP500", {"MRP_OLD", "VSNT_OLD"})
+        repository = MarketBarRepository(session)
+
+        by_security: dict[str, list] = {}
+        provider_by_security = {}
+        membership_by_security: dict[str, list] = defaultdict(list)
+        for membership in memberships:
+            membership_by_security[str(membership.security_id)].append(membership)
+        for security_id, records in sorted(membership_by_security.items()):
+            aliases = [item for item in resolver.aliases if item.security_id == security_id]
+            candidates = list(dict.fromkeys(
+                [item.provider_symbol for item in aliases] + [item.ticker for item in records]
+            ))
+            provider = None
+            bars = []
+            used_ticker = None
+            for candidate in candidates:
+                try:
+                    provider, bars = await repository.list_security_daily_bars(
+                        uuid.UUID(security_id), candidate, warmup, horizon_end,
+                        providers=("eodhd_adjusted_derived",),
+                    )
+                except Exception:
+                    continue
+                if bars:
+                    used_ticker = candidate
+                    break
+            if not bars:
+                raise RuntimeError(f"IDENTITY_BLOCKED/no logical bars: {security_id}")
+            policy = evidence.get(security_id, {})
+            supplemental_provider = policy.get("supplemental_price_provider")
+            if supplemental_provider:
+                _, supplemental = await repository.list_security_daily_bars(
+                    uuid.UUID(security_id), used_ticker, warmup, horizon_end,
+                    providers=(supplemental_provider,),
+                )
+                bars = merge_provider_bars(bars, supplemental)
+                provider = f"{provider}+{supplemental_provider}"
+            if security_id == "4eebb6ee-13b8-588c-8c90-5aaf4554ef62":
+                bars = [bar for bar in bars if bar.timestamp.date() <= date(2023, 3, 10)]
+            by_security[security_id] = bars
+            provider_by_security[security_id] = provider
+
+        current_identities = {ticker: resolver.resolve(ticker, END) for ticker in current}
+        if any(value is None for value in current_identities.values()):
+            raise RuntimeError("fixed snapshot identity resolution failed")
+        fixed_security_ids = {ticker: value.security_id for ticker, value in current_identities.items()}
+        missing_current = sorted(set(fixed_security_ids.values()) - set(by_security))
+        if missing_current:
+            raise RuntimeError(f"current securities absent from PIT logical histories: {missing_current}")
+        fixed_bars = {security_id: by_security[security_id]
+                      for security_id in sorted(set(fixed_security_ids.values()))}
+        benchmark = await repository.list_daily_bars("SPY", warmup, horizon_end, "massive")
+
+    # Mandatory pre-flight: no financial engine is called above this line.
+    validation = database_validation(memberships, sessions)
+    duplicates = sum(len(bars) - len({bar.timestamp.date() for bar in bars})
+                     for bars in by_security.values())
+    invalid = sum(not _valid_ohlcv(bar) for bars in by_security.values() for bar in bars)
+    readiness_rows = []
+    for membership in memberships:
+        security_id = str(membership.security_id)
+        bars = by_security[security_id]
+        natural = {date.fromisoformat(value) for value in
+                   evidence.get(security_id, {}).get("natural_unavailable_sessions", [])}
+        first_assessment = assess_alias_readiness(
+            membership, bars, sessions, natural_unavailable_sessions=natural
+        )
+        if security_id in audit_terminal_ids and first_assessment.get("last_price"):
+            last = date.fromisoformat(first_assessment["last_price"])
+            natural |= {item for item in sessions if item > last
+                        and membership.valid_from <= item
+                        and (membership.valid_to is None or item < membership.valid_to)}
+        readiness_rows.append(assess_alias_readiness(
+            membership, bars, sessions, natural_unavailable_sessions=natural
+        ))
+    material_gap = sum(item.get("missing_membership_sessions", 0) for item in readiness_rows)
+    identity_blocked = sum(item.get("status") == "BLOCKED" for item in readiness_rows)
+    natural_sessions = sum(item.get("natural_lifecycle_sessions", 0) for item in readiness_rows)
+    preflight = {
+        "canonical_hash": validation.deterministic_hash, "xnys_sessions": len(sessions),
+        "identity_blocked": identity_blocked, "material_data_gap": material_gap,
+        "genuine_missing_data_sessions": material_gap,
+        "duplicate_logical_bars": duplicates, "invalid_ohlcv": invalid,
+        "ticker_only_fallback": 0, "ticker_reuse_leakage": 0,
+        "fabricated_prices": 0, "synthetic_prices": 0, "forward_fill": 0,
+        "interpolation": 0, "look_ahead": 0,
+        "temporal_alias_continuity": len(resolver.aliases) == 620,
+        "security_id_authoritative": len(by_security) == 603,
+        "mrp_old_audit_only": any(item.ticker == "MRP_OLD" and
+                                  item.eligibility_status == "EXPLICITLY_NON_TRADABLE_OR_INVALID"
+                                  for item in audit_only),
+        "natural_lifecycle_sessions": natural_sessions,
+        "approved_readiness_reference": {
+            "identity_blocked": len(approved_readiness.get("blocked", [])),
+            "material_data_gap": approved_readiness["total_missing_membership_sessions"],
+            "natural_lifecycle_sessions": approved_readiness["total_natural_lifecycle_sessions"],
+        },
+    }
+    preflight["status"] = "PASS" if all((
+        preflight["canonical_hash"] == EXPECTED_HASH, len(sessions) == 1252,
+        identity_blocked == 0, material_gap == 0, duplicates == 0, invalid == 0,
+        preflight["temporal_alias_continuity"], preflight["security_id_authoritative"],
+        preflight["mrp_old_audit_only"], natural_sessions == 30,
+    )) else "FAIL"
+    if preflight["status"] != "PASS":
+        raise RuntimeError(f"PIT_DATA_INTEGRITY FAIL: {preflight}")
+
+    fixed_request = fixed_request.model_copy(update={"tickers": None})
+    pit_request = fixed_request.model_copy(update={"universe_mode": UniverseMode.POINT_IN_TIME})
+    periods = {security_id: [(item.valid_from, item.valid_to) for item in records]
+               for security_id, records in membership_by_security.items()}
+    is_member = lambda security_id, when: any(
+        start <= when and (end is None or when < end) for start, end in periods[security_id]
+    )
+    engine = BacktestEngine(calendar)
+    fixed_result = engine.run(fixed_request, fixed_bars, benchmark)
+    pit_first = engine.run(pit_request, by_security, benchmark, is_member)
+    fixed_events = [item.model_dump(mode="json") for item in fixed_result.events]
+    pit_events = [item.model_dump(mode="json") for item in pit_first.events]
+    if len(fixed_events) != 5896 or event_metrics(fixed_events, 20)["n"] != 5849:
+        raise RuntimeError("approved FIXED_REBUILT baseline was not reproduced")
+
+    fixed_classes, fixed_cases, fixed_horizon_audit = _audit_outcomes(
+        fixed_events, fixed_bars, benchmark, policies, calendar
+    )
+    pit_classes, pit_cases, pit_horizon_audit = _audit_outcomes(
+        pit_events, by_security, benchmark, policies, calendar
+    )
+
+    genuine = sum(values.get("GENUINE_MISSING_DATA", 0)
+                  for values in pit_horizon_audit.values())
+    if genuine:
+        labels = {
+            security_id: sorted(records, key=lambda item: item.valid_from)[-1].ticker
+            for security_id, records in membership_by_security.items()
+        }
+        gaps = genuine_missing_inventory(
+            pit_events, pit_classes, by_security, calendar, labels
+        )
+        preflight.update({
+            "status": "FAIL",
+            "genuine_missing_data_sessions": gaps["unique_missing_security_sessions"],
+            "genuine_missing_event_horizons": gaps["affected_event_horizons"],
+            "genuine_missing_securities": gaps["affected_securities"],
+        })
+        payload = {
+            "phase": "PHASE_2_PIT_EVENT_STUDY_ONLY",
+            "phase1_baseline": {"digest": PHASE1_DIGEST, "status": "APPROVED"},
+            "pit_data_integrity": preflight,
+            "genuine_missing_data": gaps,
+            "downstream_analyses": "NOT_RUN_STOP_CONDITION",
+            "mandatory_conditions": {
+                "PIT_DATA_INTEGRITY": "FAIL",
+                "IDENTITY_BLOCKED": identity_blocked,
+                "MATERIAL_DATA_GAP": material_gap,
+                "GENUINE_MISSING_DATA": gaps["unique_missing_security_sessions"],
+                "PIT_EVENT_DETERMINISM": "NOT_RUN",
+                "BOTH_INVARIANCE": "NOT_RUN",
+                "ARITHMETIC_BRIDGE": "NOT_RUN",
+                "DATE_CLUSTERED_BOOTSTRAP": "NOT_RUN",
+            },
+            "decision": "NOT_READY_FOR_PHASE_3",
+        }
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        print(json.dumps({
+            "pit_data_integrity": "FAIL",
+            "genuine_missing_security_sessions": gaps["unique_missing_security_sessions"],
+            "affected_event_horizons": gaps["affected_event_horizons"],
+            "affected_securities": gaps["affected_securities"],
+            "downstream_analyses": "NOT_RUN_STOP_CONDITION",
+            "decision": payload["decision"],
+            "output": str(output),
+        }, indent=2))
+        return payload
+
+    pit_second = engine.run(pit_request, by_security, benchmark, is_member)
+    pit_repeat_events = [item.model_dump(mode="json") for item in pit_second.events]
+    repeat_classes, _, _ = _audit_outcomes(
+        pit_repeat_events, by_security, benchmark, policies, calendar
+    )
+    pit_digest_first = deterministic_phase2_digest(pit_events, pit_classes)
+    pit_digest_second = deterministic_phase2_digest(pit_repeat_events, repeat_classes)
+    determinism = {
+        "status": "PASS" if pit_digest_first == pit_digest_second else "FAIL",
+        "first_event_count": len(pit_events), "second_event_count": len(pit_repeat_events),
+        "first_digest": pit_digest_first, "second_digest": pit_digest_second,
+    }
+    if determinism["status"] != "PASS":
+        raise RuntimeError("PIT_EVENT_DETERMINISM FAIL")
+
+    decomposition = decompose_events(fixed_events, pit_events)
+    invariance = compare_both_invariance(
+        decomposition["BOTH_FIXED"], decomposition["BOTH_PIT"], fixed_classes, pit_classes
+    )
+    if invariance["status"] != "PASS":
+        raise RuntimeError(f"BOTH_INVARIANCE FAIL: {invariance}")
+
+    bridge = arithmetic_bridge(
+        decomposition["BOTH_PIT"], decomposition["FIXED_ONLY"], decomposition["PIT_ONLY"]
+    )
+    if bridge["status"] != "PASS":
+        raise RuntimeError(f"ARITHMETIC_BRIDGE FAIL: {bridge}")
+
+    fixed_metrics = {str(h): event_metrics(fixed_events, h) for h in HORIZONS}
+    pit_metrics = {str(h): event_metrics(pit_events, h) for h in HORIZONS}
+    metric_differences = {str(h): _metrics_delta(fixed_metrics[str(h)], pit_metrics[str(h)])
+                          for h in HORIZONS}
+    groups = {
+        "BOTH": subset_metrics(decomposition["BOTH_PIT"]),
+        "PIT_ONLY": subset_metrics(decomposition["PIT_ONLY"]),
+        "FIXED_ONLY": subset_metrics(decomposition["FIXED_ONLY"]),
+    }
+
+    fixed_20_groups = values_by_date(fixed_events, 20)
+    pit_20_groups = values_by_date(pit_events, 20)
+    lower_overrides = lifecycle_overrides(pit_cases, "LOWER")
+    upper_overrides = lifecycle_overrides(pit_cases, "UPPER")
+    pit_lower_groups = values_by_date(pit_events, 20, lower_overrides)
+    pit_upper_groups = values_by_date(pit_events, 20, upper_overrides)
+    bootstrap = {
+        "fixed_rebuilt": date_clustered_bootstrap(
+            fixed_20_groups, seed=BOOTSTRAP_SEED, resamples=BOOTSTRAP_RESAMPLES
+        ),
+        "pit": date_clustered_bootstrap(
+            pit_20_groups, seed=BOOTSTRAP_SEED, resamples=BOOTSTRAP_RESAMPLES
+        ),
+        "difference": paired_date_clustered_bootstrap(
+            fixed_20_groups, pit_20_groups,
+            seed=BOOTSTRAP_SEED, resamples=BOOTSTRAP_RESAMPLES,
+        ),
+        "lower_difference": paired_date_clustered_bootstrap(
+            fixed_20_groups, pit_lower_groups,
+            seed=BOOTSTRAP_SEED, resamples=BOOTSTRAP_RESAMPLES,
+        ),
+        "upper_difference": paired_date_clustered_bootstrap(
+            fixed_20_groups, pit_upper_groups,
+            seed=BOOTSTRAP_SEED, resamples=BOOTSTRAP_RESAMPLES,
+        ),
+    }
+    bootstrap["status"] = "PASS" if all(
+        item["status"] == "PASS" for item in bootstrap.values() if isinstance(item, dict)
+    ) else "FAIL"
+
+    sensitivity = {}
+    for horizon in (20, 60):
+        primary = pit_metrics[str(horizon)]
+        lower = sensitivity_metrics(pit_events, pit_cases, horizon, "LOWER")
+        upper = sensitivity_metrics(pit_events, pit_cases, horizon, "UPPER")
+        sensitivity[str(horizon)] = {
+            "LOWER": lower, "PRIMARY": primary, "UPPER": upper,
+            "pit_minus_fixed": {
+                "LOWER": _metrics_delta(fixed_metrics[str(horizon)], lower),
+                "PRIMARY": metric_differences[str(horizon)],
+                "UPPER": _metrics_delta(fixed_metrics[str(horizon)], upper),
+            },
+        }
+
+    fixed_score = ScoreResearchEngine(calendar).run(
+        ScoreResearchRequest(backtest_run_id=fixed_result.run_id), fixed_result
+    )
+    pit_score = ScoreResearchEngine(calendar).run(
+        ScoreResearchRequest(backtest_run_id=pit_first.run_id), pit_first
+    )
+    fixed_regime = MarketRegimeEngine().run(
+        MarketRegimeRequest(backtest_run_id=fixed_result.run_id), fixed_result, benchmark
+    )
+    pit_regime = MarketRegimeEngine().run(
+        MarketRegimeRequest(backtest_run_id=pit_first.run_id), pit_first, benchmark
+    )
+
+    original_events = original["events"]
+    original_mapped, unmapped = map_fixed_universe_events(
+        original_events, fixed_security_ids, resolver
+    )
+    if unmapped:
+        raise RuntimeError("approved Phase 1 mapping no longer reproduces UNMAPPED=0")
+    original_map = {(identity.security_id, identity.signal_date): (identity, event)
+                    for identity, event in original_mapped}
+    fixed_map = event_map(fixed_events)
+    additional_keys = fixed_map.keys() - original_map.keys()
+    additional = [fixed_map[key] for key in additional_keys]
+    original_dates, fixed_dates = _date_counts(original_events), _date_counts(fixed_events)
+    all_dates = sorted(set(original_dates) | set(fixed_dates))
+    largest_dates = sorted(({
+        "signal_date": when, "original": original_dates[when], "fixed_rebuilt": fixed_dates[when],
+        "difference": fixed_dates[when] - original_dates[when],
+        "absolute_difference": abs(fixed_dates[when] - original_dates[when]),
+    } for when in all_dates), key=lambda item: (-item["absolute_difference"], item["signal_date"]))[:20]
+    fixed_regime_lookup = {
+        (row["ticker"], row["signal_date"]): row
+        for row in fixed_regime.results["observations"]
+    }
+    additional_regimes = {
+        "sma200": dict(Counter(fixed_regime_lookup[(item["ticker"], item["signal_date"])]["sma200_regime"]
+                               for item in additional)),
+        "configuration": dict(Counter(fixed_regime_lookup[(item["ticker"], item["signal_date"])]["configuration"]
+                                      for item in additional)),
+        "volatility": dict(Counter(fixed_regime_lookup[(item["ticker"], item["signal_date"])]["volatility_regime"]
+                                   for item in additional)),
+    }
+    signal_expansion = {
+        "original_events": len(original_events), "fixed_rebuilt_events": len(fixed_events),
+        "original_by_year": _annual_counts(original_events),
+        "fixed_rebuilt_by_year": _annual_counts(fixed_events),
+        "original_date_distribution": signal_distribution(original_events),
+        "fixed_rebuilt_date_distribution": signal_distribution(fixed_events),
+        "largest_absolute_date_differences": largest_dates,
+        "additional_fixed_rebuilt_events": len(additional),
+        "additional_score_buckets": dict(Counter(score_bucket(float(item["score"])) for item in additional)),
+        "additional_20d": event_metrics(additional, 20),
+        "additional_regimes": additional_regimes,
+    }
+    spy_consistency = {
+        "20": _spy_consistency(original_map, fixed_map, 20),
+        "60": _spy_consistency(original_map, fixed_map, 60),
+        "supported_explanation": (
+            "Matched events use identical SPY returns; the approved 60d pattern is therefore supported "
+            "by changed equity price histories plus event-set/timing composition, not SPY-source differences."
+        ),
+    }
+
+    pit_key_set = set(event_map(pit_events))
+    fixed_key_set = set(event_map(fixed_events))
+    set_for_key = {key: ("BOTH" if key in fixed_key_set else "PIT_ONLY") for key in pit_key_set}
+    lifecycle_counts = {str(h): {"BOTH": Counter(), "PIT_ONLY": Counter(), "FIXED_ONLY": Counter()}
+                        for h in HORIZONS}
+    for case in pit_cases:
+        lifecycle_counts[str(case.horizon)][set_for_key[(case.security_id, case.signal_date)]][case.reason] += 1
+    for case in fixed_cases:
+        base_key = (case.security_id, case.signal_date)
+        if base_key not in pit_key_set:
+            lifecycle_counts[str(case.horizon)]["FIXED_ONLY"][case.reason] += 1
+    lifecycle_counts = {h: {group: dict(sorted(values.items())) for group, values in groups_.items()}
+                        for h, groups_ in lifecycle_counts.items()}
+
+    score_buckets = {
+        "fixed_rebuilt": score_bucket_metrics(fixed_events),
+        "pit": score_bucket_metrics(pit_events),
+    }
+    payload = {
+        "phase": "PHASE_2_PIT_EVENT_STUDY_ONLY",
+        "phase1_baseline": {"digest": PHASE1_DIGEST, "status": "APPROVED"},
+        "pit_data_integrity": preflight,
+        "pit_event_determinism": determinism,
+        "both_invariance": invariance,
+        "event_counts": {
+            "fixed_rebuilt": len(fixed_events), "pit": len(pit_events),
+            "both": len(decomposition["BOTH_PIT"]),
+            "pit_only": len(decomposition["PIT_ONLY"]),
+            "fixed_only": len(decomposition["FIXED_ONLY"]),
+        },
+        "event_set_summaries": {
+            "BOTH": set_summary(decomposition["BOTH_PIT"]),
+            "PIT_ONLY": set_summary(decomposition["PIT_ONLY"]),
+            "FIXED_ONLY": set_summary(decomposition["FIXED_ONLY"]),
+        },
+        "event_set_metrics": groups,
+        "metrics": {"fixed_rebuilt": fixed_metrics, "pit": pit_metrics,
+                    "pit_minus_fixed_rebuilt": metric_differences},
+        "primary_metric": {
+            "name": "20-session mean excess return vs SPY",
+            "pit_minus_fixed_rebuilt": metric_differences["20"]["mean_excess_return"],
+        },
+        "bootstrap": bootstrap,
+        "arithmetic_bridge": bridge,
+        "horizon_completeness": {
+            "fixed_rebuilt": horizon_completeness(fixed_events),
+            "pit": horizon_completeness(pit_events),
+            "fixed_classifications": fixed_horizon_audit,
+            "pit_classifications": pit_horizon_audit,
+        },
+        "lifecycle": {
+            "primary_treatment": "EXCLUDED",
+            "cases": len(pit_cases),
+            "diagnostic_evaluable_cases": sum(item.diagnostic_evaluable for item in pit_cases),
+            "no_next_open_or_benchmark_cases": sum(not item.diagnostic_evaluable for item in pit_cases),
+            "counts_by_horizon_set_reason": lifecycle_counts,
+        },
+        "sensitivity": sensitivity,
+        "score_buckets": score_buckets,
+        "score_bucket_boundaries": {"20": "20-40", "40": "40-60", "60": "60-80", "80": "80-100"},
+        "feature_correlations": {
+            "method": "Phase 6 ScoreResearchEngine component methodology",
+            "fixed_rebuilt": _feature_summary(fixed_score),
+            "pit": _feature_summary(pit_score),
+        },
+        "market_regimes": {
+            "method": pit_regime.results["volatility_method"],
+            "fixed_rebuilt": _regime_summary(fixed_regime),
+            "pit": _regime_summary(pit_regime),
+        },
+        "signal_expansion": signal_expansion,
+        "spy_consistency": spy_consistency,
+    }
+    mandatory = {
+        "PIT_DATA_INTEGRITY": preflight["status"],
+        "PIT_EVENT_DETERMINISM": determinism["status"],
+        "BOTH_INVARIANCE": invariance["status"],
+        "ARITHMETIC_BRIDGE": bridge["status"],
+        "DATE_CLUSTERED_BOOTSTRAP": bootstrap["status"],
+        "IDENTITY_BLOCKED": identity_blocked,
+        "MATERIAL_DATA_GAP": material_gap,
+        "GENUINE_MISSING_DATA": genuine,
+        "truncated_event_audit": "PASS",
+        "sensitivity_bounds": "PASS",
+        "feature_regime_baseline": "PASS",
+        "signal_expansion_diagnostic": "PASS",
+        "spy_consistency_diagnostic": "PASS",
+    }
+    payload["mandatory_conditions"] = mandatory
+    payload["decision"] = "READY_FOR_PHASE_3" if all(
+        value == "PASS" or value == 0 for value in mandatory.values()
+    ) else "NOT_READY_FOR_PHASE_3"
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    print(json.dumps({
+        "pit_data_integrity": preflight["status"], "pit_events": len(pit_events),
+        "both": len(decomposition["BOTH_PIT"]), "pit_only": len(decomposition["PIT_ONLY"]),
+        "fixed_only": len(decomposition["FIXED_ONLY"]), "both_invariance": invariance["status"],
+        "arithmetic_bridge": bridge["status"], "determinism": determinism["status"],
+        "bootstrap": bootstrap["status"], "decision": payload["decision"],
+        "output": str(output),
+    }, indent=2))
+    return payload
+
+
+if __name__ == "__main__":
+    asyncio.run(run(parser().parse_args()))

@@ -1,0 +1,359 @@
+{
+  "18726de7-5f34-5d86-a886-dcfc331b0c36": {
+    "ticker": "WBA",
+    "company_name": "Walgreens Boots Alliance, Inc.",
+    "classification": "ACQUISITION",
+    "transaction_type": "OTHER",
+    "announcement_date": "2025-03-06",
+    "closing_date": "2025-08-28",
+    "last_regular_trading_date": "2025-08-27",
+    "cash_consideration": "$11.45 per share",
+    "stock_consideration": null,
+    "contingent_consideration": "One non-transferable right per share to receive up to $3.00 in cash from 70% of net proceeds from future monetization of WBA's VillageMD interests",
+    "non_tradable_component": true,
+    "confidence": "HIGH",
+    "primary_price_provider": "eodhd_adjusted_derived",
+    "primary_provider_last_bar": "2025-08-28",
+    "primary_provider_post_termination_artifact": true,
+    "alternative_provider": {
+      "name": "massive",
+      "bars": 6,
+      "first": "2025-08-20",
+      "last": "2025-08-27",
+      "conclusion": "Corroborates the final regular trading date; no continuing-trading coverage gap."
+    },
+    "sources": [
+      {
+        "publisher": "SEC / Walgreens Boots Alliance Form 8-K",
+        "publication_date": "2025-08-28",
+        "url": "https://www.sec.gov/Archives/edgar/data/1618921/000119312525190603/d87240d8k.htm",
+        "supports": "Closing, cessation before the market open, and merger consideration."
+      },
+      {
+        "publisher": "SEC / Sycamore closing release",
+        "publication_date": "2025-08-28",
+        "url": "https://www.sec.gov/Archives/edgar/data/1618921/000119312525190603/d87240dex991.htm",
+        "supports": "$11.45 cash plus the non-transferable contingent right."
+      }
+    ]
+  },
+  "51f5567e-647b-5136-a9d1-9bd0ddc9d01b": {
+    "ticker": "DAY",
+    "company_name": "Dayforce, Inc.",
+    "classification": "ACQUISITION",
+    "transaction_type": "CASH",
+    "announcement_date": "2025-08-21",
+    "closing_date": "2026-02-04",
+    "last_regular_trading_date": "2026-02-03",
+    "cash_consideration": "$70.00 per share",
+    "stock_consideration": null,
+    "contingent_consideration": null,
+    "non_tradable_component": false,
+    "confidence": "HIGH",
+    "primary_price_provider": "eodhd_adjusted_derived",
+    "primary_provider_last_bar": "2026-02-04",
+    "primary_provider_post_termination_artifact": true,
+    "alternative_provider": {
+      "name": "massive",
+      "bars": 7,
+      "first": "2026-01-26",
+      "last": "2026-02-03",
+      "conclusion": "Corroborates the final regular trading date; no continuing-trading coverage gap."
+    },
+    "alias_chain": {
+      "security_id_continuity": "PROVEN",
+      "intervals": [
+        {"ticker": "CDAY", "valid_from": "2021-09-20", "valid_to": "2024-02-01"},
+        {"ticker": "DAY", "valid_from": "2024-02-01", "valid_to": "2026-02-09"}
+      ],
+      "stable_identifiers": {
+        "CIK": "0001725057",
+        "CUSIP": "15677J108",
+        "ISIN": "US15677J1088",
+        "OpenFigi": "BBG005D7PF34"
+      }
+    },
+    "sources": [
+      {
+        "publisher": "SEC / Dayforce closing release",
+        "publication_date": "2026-02-04",
+        "url": "https://www.sec.gov/Archives/edgar/data/1725057/000114036126003628/ef20064744_ex99-2.htm",
+        "supports": "Closing and $70.00 cash consideration."
+      },
+      {
+        "publisher": "NYSE Form 25 notice filed with SEC",
+        "publication_date": "2026-02-04",
+        "url": "https://www.sec.gov/Archives/edgar/data/1725057/000087666126000087/ruleprovisionnotice.htm",
+        "supports": "Merger effective and trading suspended on 2026-02-04."
+      },
+      {
+        "publisher": "SEC / Dayforce annual report",
+        "publication_date": "2024-03-13",
+        "url": "https://www.sec.gov/Archives/edgar/data/1725057/000119312524065972/d700750dars.pdf",
+        "supports": "CDAY to DAY ticker change effective 2024-02-01 for the same issuer."
+      }
+    ]
+  },
+  "7556317a-8d08-5a8f-aa95-76973fb31777": {
+    "ticker": "CERN",
+    "company_name": "Cerner Corporation",
+    "classification": "ACQUISITION",
+    "transaction_type": "CASH",
+    "announcement_date": "2021-12-20",
+    "closing_date": "2022-06-08",
+    "last_regular_trading_date": "2022-06-07",
+    "cash_consideration": "$95.00 per share",
+    "stock_consideration": null,
+    "contingent_consideration": null,
+    "non_tradable_component": false,
+    "confidence": "HIGH",
+    "primary_price_provider": "eodhd_adjusted_derived",
+    "primary_provider_last_bar": "2022-06-08",
+    "primary_provider_post_termination_artifact": true,
+    "alternative_provider": {
+      "name": "massive",
+      "bars": 5,
+      "first": "2022-06-01",
+      "last": "2022-06-07",
+      "conclusion": "Corroborates the final regular trading date; no continuing-trading coverage gap."
+    },
+    "sources": [
+      {
+        "publisher": "SEC / Cerner Form 8-K",
+        "publication_date": "2022-06-08",
+        "url": "https://www.sec.gov/Archives/edgar/data/804753/000119312522169841/d223229d8k.htm",
+        "supports": "Merger completed and Nasdaq suspension before the 2022-06-08 open."
+      },
+      {
+        "publisher": "Oracle",
+        "publication_date": "2022-06-07",
+        "url": "https://www.oracle.com/news/announcement/oracle-completes-acquisition-of-cerner-2022-06-07/",
+        "supports": "Closing chronology and all-cash acquisition."
+      }
+    ]
+  },
+  "9b2793b9-27ef-515e-9f54-49f341f7ed56": {
+    "ticker": "NLSN",
+    "company_name": "Nielsen Holdings plc",
+    "classification": "ACQUISITION",
+    "transaction_type": "CASH",
+    "announcement_date": "2022-03-29",
+    "closing_date": "2022-10-11",
+    "last_regular_trading_date": "2022-10-11",
+    "cash_consideration": "$28.00 per share",
+    "stock_consideration": null,
+    "contingent_consideration": null,
+    "non_tradable_component": false,
+    "confidence": "HIGH",
+    "primary_price_provider": "eodhd_adjusted_derived",
+    "primary_provider_last_bar": "2022-10-12",
+    "primary_provider_post_termination_artifact": true,
+    "alternative_provider": {
+      "name": "massive",
+      "bars": 7,
+      "first": "2022-10-03",
+      "last": "2022-10-11",
+      "conclusion": "Corroborates the final regular trading date; no continuing-trading coverage gap."
+    },
+    "sources": [
+      {
+        "publisher": "SEC / Nielsen Form 8-K",
+        "publication_date": "2022-10-11",
+        "url": "https://www.sec.gov/Archives/edgar/data/1492633/000119312522260583/d407513d8k.htm",
+        "supports": "Closing and NYSE suspension before the 2022-10-12 open."
+      },
+      {
+        "publisher": "SEC / Nielsen closing release",
+        "publication_date": "2022-10-11",
+        "url": "https://www.sec.gov/Archives/edgar/data/1492633/000119312522260583/d407513dex991.htm",
+        "supports": "$28.00 cash consideration and final trading chronology."
+      }
+    ]
+  },
+  "a6f59b1b-3c11-528e-bde0-17d3b38c94a2": {
+    "ticker": "ATVI",
+    "company_name": "Activision Blizzard, Inc.",
+    "classification": "ACQUISITION",
+    "transaction_type": "CASH",
+    "announcement_date": "2022-01-18",
+    "closing_date": "2023-10-13",
+    "last_regular_trading_date": "2023-10-12",
+    "cash_consideration": "$95.00 per share",
+    "stock_consideration": null,
+    "contingent_consideration": null,
+    "non_tradable_component": false,
+    "confidence": "HIGH",
+    "primary_price_provider": "eodhd_adjusted_derived",
+    "primary_provider_last_bar": "2023-10-13",
+    "primary_provider_post_termination_artifact": true,
+    "sources": [
+      {
+        "publisher": "SEC / Activision Blizzard Form 8-K",
+        "publication_date": "2023-10-13",
+        "url": "https://www.sec.gov/Archives/edgar/data/718877/000110465923108985/tm2328253d1_8k.htm",
+        "supports": "Closing and Nasdaq halt before the closing-date open."
+      },
+      {
+        "publisher": "Microsoft",
+        "publication_date": "2023-10-13",
+        "url": "https://news.microsoft.com/wp-content/uploads/prod/sites/653/2023/10/Phil-Spencer-email-to-Microsoft-employees.pdf",
+        "supports": "Acquisition completion."
+      }
+    ]
+  },
+  "ae13e1b5-7a16-59c1-95ce-2bfa52b340d7": {
+    "ticker": "TWTR",
+    "company_name": "Twitter, Inc.",
+    "classification": "ACQUISITION",
+    "transaction_type": "CASH",
+    "announcement_date": "2022-04-25",
+    "closing_date": "2022-10-27",
+    "last_regular_trading_date": "2022-10-27",
+    "cash_consideration": "$54.20 per share",
+    "stock_consideration": null,
+    "contingent_consideration": null,
+    "non_tradable_component": false,
+    "confidence": "HIGH",
+    "primary_price_provider": "eodhd_adjusted_derived",
+    "primary_provider_last_bar": "2022-10-27",
+    "primary_provider_post_termination_artifact": false,
+    "alternative_provider": {
+      "name": "massive",
+      "bars": 6,
+      "first": "2022-10-20",
+      "last": "2022-10-27",
+      "conclusion": "Corroborates that no 2022-10-28 NEXT_OPEN existed."
+    },
+    "sources": [
+      {
+        "publisher": "SEC / Twitter Form 8-K",
+        "publication_date": "2022-10-27",
+        "url": "https://www.sec.gov/Archives/edgar/data/1418091/000119312522272772/d411753d8k.htm",
+        "supports": "Closing and NYSE suspension before the 2022-10-28 open."
+      }
+    ]
+  },
+  "c114dfd9-2d71-561b-85f9-ad960d44a55e": {
+    "ticker": "SIVB",
+    "company_name": "SVB Financial Group",
+    "classification": "BANKRUPTCY",
+    "transaction_type": "OTHER",
+    "announcement_date": "2023-03-10",
+    "closing_date": "2023-03-10",
+    "last_regular_trading_date": "2023-03-09",
+    "cash_consideration": null,
+    "stock_consideration": null,
+    "contingent_consideration": null,
+    "non_tradable_component": false,
+    "confidence": "HIGH",
+    "primary_price_provider": "eodhd_adjusted_derived",
+    "primary_provider_last_bar": "2023-03-09",
+    "primary_provider_post_termination_artifact": false,
+    "sources": [
+      {
+        "publisher": "Validated EODHD POC 3 security master",
+        "publication_date": "2026-09-28",
+        "url": "backend/data/eodhd_poc3/audit.json",
+        "supports": "High-confidence receivership classification and terminal price boundary."
+      }
+    ]
+  },
+  "d47ba1df-c0d0-5767-b105-569310d659b2": {
+    "ticker": "CTRA",
+    "company_name": "Coterra Energy Inc.",
+    "classification": "MERGER",
+    "transaction_type": "STOCK",
+    "announcement_date": "2026-02-02",
+    "agreement_date": "2026-02-01",
+    "closing_date": "2026-05-07",
+    "last_regular_trading_date": "2026-05-06",
+    "cash_consideration": "Cash in lieu of fractional DVN shares only",
+    "stock_consideration": "0.70 DVN share per CTRA share",
+    "contingent_consideration": null,
+    "non_tradable_component": false,
+    "confidence": "HIGH",
+    "primary_price_provider": "eodhd_adjusted_derived",
+    "primary_provider_last_bar": "2026-05-07",
+    "primary_provider_post_termination_artifact": true,
+    "alternative_provider": {
+      "name": "massive",
+      "bars": 4,
+      "first": "2026-05-01",
+      "last": "2026-05-06",
+      "conclusion": "Corroborates the final regular trading date; no continuing-trading coverage gap."
+    },
+    "alias_chain": {
+      "security_id_continuity": "PROVEN",
+      "conclusion": "Cabot Oil & Gas Corporation remained the surviving public issuer, changed its legal name to Coterra Energy Inc., retained CIK 0000858470, and changed COG to CTRA effective at the 2021-10-04 open. Cimarex was a merger predecessor, not an alias to be joined by ticker.",
+      "intervals": [
+        {"ticker": "COG", "valid_from": "2008-06-23", "valid_to": "2021-10-04"},
+        {"ticker": "CTRA", "valid_from": "2021-10-04", "valid_to": "2026-05-07"}
+      ],
+      "stable_identifiers": {
+        "CIK": "0000858470",
+        "CUSIP": "127097103",
+        "ISIN": "US1270971039",
+        "OpenFigi": "BBG000C3GN47"
+      }
+    },
+    "sources": [
+      {
+        "publisher": "SEC / Coterra 2021 closing release",
+        "publication_date": "2021-10-01",
+        "url": "https://www.sec.gov/Archives/edgar/data/858470/000110465921122041/tm2129019d1_ex99-1.htm",
+        "supports": "COG through 2021-10-01 and CTRA from the 2021-10-04 open for the surviving issuer."
+      },
+      {
+        "publisher": "SEC / Coterra 2026 Form 8-K",
+        "publication_date": "2026-05-07",
+        "url": "https://www.sec.gov/Archives/edgar/data/858470/000110465926057278/tm2613882d1_8k.htm",
+        "supports": "Devon merger closing chronology."
+      },
+      {
+        "publisher": "NYSE Form 25 notice filed with SEC",
+        "publication_date": "2026-05-07",
+        "url": "https://www.sec.gov/Archives/edgar/data/858470/000087666126000399/ruleprovisionnotice.htm",
+        "supports": "0.70 DVN share consideration and suspension on 2026-05-07."
+      }
+    ]
+  },
+  "ea064420-88f9-5a08-982c-28a3459de19b": {
+    "ticker": "EA",
+    "company_name": "Electronic Arts Inc.",
+    "classification": "ACQUISITION",
+    "transaction_type": "CASH",
+    "announcement_date": "2025-09-29",
+    "agreement_date": "2025-09-28",
+    "closing_date": "2026-08-04",
+    "last_regular_trading_date": "2026-08-04",
+    "cash_consideration": "$210.00 per share",
+    "stock_consideration": null,
+    "contingent_consideration": null,
+    "non_tradable_component": false,
+    "confidence": "HIGH",
+    "primary_price_provider": "eodhd_adjusted_derived",
+    "primary_provider_last_bar": "2026-08-10",
+    "primary_provider_post_termination_artifact": true,
+    "alternative_provider": {
+      "name": "massive",
+      "bars": 2,
+      "first": "2026-08-03",
+      "last": "2026-08-04",
+      "conclusion": "Corroborates the final regular trading date; no continuing-trading coverage gap."
+    },
+    "sources": [
+      {
+        "publisher": "SEC / Electronic Arts Form 8-K",
+        "publication_date": "2026-08-04",
+        "url": "https://www.sec.gov/Archives/edgar/data/712515/000114036126031157/ef20079099_8k.htm",
+        "supports": "Merger completion."
+      },
+      {
+        "publisher": "Nasdaq corporate-actions alert",
+        "publication_date": "2026-07-31",
+        "url": "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-545",
+        "supports": "Last trading date 2026-08-04, suspension 2026-08-05, and $210 consideration."
+      }
+    ]
+  }
+}

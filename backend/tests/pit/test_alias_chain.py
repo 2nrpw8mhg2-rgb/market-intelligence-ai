@@ -82,3 +82,20 @@ def test_replacement_identity_does_not_reuse_old_security_id() -> None:
     assert chain[0].security_id == "issuer-2"
     assert chain[0].historical_ticker == "REPLACEMENT"
     assert dict(chain[0].identifiers) == {"ISIN": "US0000000002"}
+
+
+def test_ctra_documented_override_preserves_identity_across_cog_ticker_change() -> None:
+    row = source([])
+    row["security_id"] = "ctra-security"
+    row["membership"] = {"ticker": "CTRA", "start": "2008-06-23", "end": "2026-05-07"}
+    row["identity"]["provider_symbol"] = "CTRA"
+    row["identity"]["identifiers"] = {"CIK": "0000858470"}
+    chain = build_linear_alias_chain(row, symbol_changes_override=[{
+        "old_symbol": "COG", "new_symbol": "CTRA", "effective": "2021-10-04",
+    }])
+    assert [(item.historical_ticker, item.valid_from, item.valid_to) for item in chain] == [
+        ("COG", date(2008, 6, 23), date(2021, 10, 4)),
+        ("CTRA", date(2021, 10, 4), date(2026, 5, 7)),
+    ]
+    assert {item.security_id for item in chain} == {"ctra-security"}
+    assert {dict(item.identifiers)["CIK"] for item in chain} == {"0000858470"}

@@ -39,5 +39,17 @@
     "natural_unavailable_sessions": ["2023-03-13", "2023-03-14"],
     "classification": "NATURAL_POSTHISTORY_LIMITATION",
     "evidence": "Nasdaq halted SBNY at 04:00:01 ET on 2023-03-13 pending additional information; Signature Bank had been closed by NYSDFS on 2023-03-12 and placed into FDIC receivership. S&P DJI removed SBNY effective prior to the 2023-03-15 open. No regular-session bar is expected for 2023-03-13 or 2023-03-14."
+  },
+  "d47ba1df-c0d0-5767-b105-569310d659b2": {
+    "symbol_changes_override": [
+      {
+        "old_symbol": "COG",
+        "new_symbol": "CTRA",
+        "effective": "2021-10-04",
+        "company_name": "Coterra Energy Inc.",
+        "exchange": "US"
+      }
+    ],
+    "evidence": "SEC Form 8-K and issuer closing materials establish that Cabot Oil & Gas Corporation remained the surviving public issuer, changed its legal name to Coterra Energy Inc., retained CIK 0000858470, and changed its NYSE ticker from COG to CTRA at the 2021-10-04 open. Cimarex is a merger predecessor, not a ticker alias for this security_id."
   }
 }

@@ -33,6 +33,7 @@ class LogicalBar:
 def build_linear_alias_chain(
     row: dict[str, Any], *, predecessor_override: str | None = None,
     replacement_identity: dict[str, Any] | None = None,
+    symbol_changes_override: list[dict[str, Any]] | None = None,
 ) -> list[AliasInterval]:
     """Build only documentary linear ticker chains; ambiguous forks fail closed."""
     security_id = str((replacement_identity or {}).get("security_id") or row["security_id"])
@@ -48,7 +49,12 @@ def build_linear_alias_chain(
             "confidence": replacement_identity["confidence"],
         }
     identifiers = tuple(sorted((str(k), str(v)) for k, v in identity.get("identifiers", {}).items() if v))
-    changes = sorted(identity.get("symbol_changes", []), key=lambda item: str(item["effective"]))
+    changes = sorted(
+        symbol_changes_override
+        if symbol_changes_override is not None
+        else identity.get("symbol_changes", []),
+        key=lambda item: str(item["effective"]),
+    )
     # Multiple predecessors entering one ticker are a merger/acquisition fork,
     # not proof that all predecessors share the successor security identity.
     incoming: dict[tuple[str, date], list[str]] = {}

@@ -44,6 +44,7 @@ def run(args):
         chain = build_linear_alias_chain(
             row, predecessor_override=item_evidence.get("predecessor_override"),
             replacement_identity=item_evidence.get("replacement_identity"),
+            symbol_changes_override=item_evidence.get("symbol_changes_override"),
         )
         if len(chain) > 1:
             multi_count += 1
