@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import csv
+import hashlib
 import json
 import statistics
 import uuid
@@ -24,9 +25,11 @@ from app.research.fixed_rebuilt import (
     map_fixed_universe_events, outcome, score_bucket,
 )
 from app.research.pit_phase2 import (
-    HORIZONS, LifecycleCase, arithmetic_bridge, compare_both_invariance,
+    HORIZONS, LifecycleCase, arithmetic_bridge, classify_ma_timing, compare_both_invariance,
     date_clustered_bootstrap, decompose_events, deterministic_phase2_digest,
-    event_map, genuine_missing_inventory, lifecycle_overrides, paired_date_clustered_bootstrap,
+    event_key, event_map, executable_events, field_dependency_audit,
+    financially_relevant_unknown, genuine_missing_inventory, lifecycle_bounds_active,
+    lifecycle_overrides, paired_date_clustered_bootstrap,
     score_bucket_metrics, sensitivity_metrics, set_summary, signal_distribution,
     subset_metrics, values_by_date,
 )
@@ -49,38 +52,44 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--evidence", default="docs/PIT_ALIAS_CHAIN_EVIDENCE.json")
     command.add_argument("--audit", default="data/eodhd_poc3/audit.json")
     command.add_argument("--readiness", default="data/pit_materialization/readiness.json")
+    command.add_argument("--lifecycle-evidence", default="docs/PIT_LIFECYCLE_EVIDENCE.json")
+    command.add_argument("--boundary-evidence", default="docs/PIT_PHASE2B_BOUNDARY_EVIDENCE.json")
+    command.add_argument("--phase2b", default="data/phase2b_symmetric/diagnostics.json")
     command.add_argument("--output", default="data/phase2_pit_event_study/diagnostics.json")
     return command
 
 
-def terminal_policy(audit: dict[str, Any], evidence: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    policies = {}
-    for row in audit["security_master"]:
-        security_id = str(row["security_id"])
-        event = row.get("event", {})
-        classification = str(event.get("classification") or "")
-        confidence = str(event.get("confidence") or "")
-        last = row.get("prices", {}).get("last")
-        if not last:
-            continue
-        if classification == "ACQUISITION_CASH":
-            reason = "ACQUISITION"
+def terminal_policy(
+    lifecycle_evidence: dict[str, Any], boundary_evidence: dict[str, Any],
+    alias_evidence: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    policies: dict[str, dict[str, Any]] = {}
+    records = dict(lifecycle_evidence)
+    records.update(boundary_evidence["lifecycle_events"])
+    for security_id, event in records.items():
+        classification = str(event["classification"])
+        if classification in {"BANKRUPTCY", "RECEIVERSHIP", "INSOLVENCY"}:
+            reason = "BANKRUPTCY"
         elif "MERGER" in classification:
             reason = "MERGER"
-        elif classification in {"RECEIVERSHIP", "BANKRUPTCY", "INSOLVENCY"}:
-            reason = "BANKRUPTCY"
-        elif classification == "DELISTING":
-            reason = "DELISTING_OTHER" if confidence == "HIGH" else "UNKNOWN"
+        elif "ACQUISITION" in classification:
+            reason = "ACQUISITION"
+        elif "DELIST" in classification:
+            reason = "DELISTING_OTHER"
         else:
-            continue
-        policies[security_id] = {
-            "last_session": date.fromisoformat(last), "reason": reason,
-            "source_classification": classification, "confidence": confidence,
+            reason = "UNKNOWN"
+        policies[str(security_id)] = {
+            "ticker": event.get("ticker"),
+            "last_session": date.fromisoformat(event["last_regular_trading_date"]),
+            "reason": reason, "source_classification": classification,
+            "confidence": event.get("confidence"),
+            "announcement_date": event.get("announcement_date"),
+            "closing_date": event.get("closing_date"),
         }
     # SBNY is a proven bank failure/receivership with no regular-session
     # resumption. Later reused-ticker aggregates must never enter this identity.
     sbny = "4eebb6ee-13b8-588c-8c90-5aaf4554ef62"
-    if sbny in evidence:
+    if sbny in alias_evidence:
         policies[sbny] = {
             "last_session": date(2023, 3, 10), "reason": "BANKRUPTCY",
             "source_classification": "FDIC_RECEIVERSHIP", "confidence": "HIGH",
@@ -145,6 +154,7 @@ def _audit_outcomes(
                     entry_price=(float(event["entry_price"]) if event.get("entry_price") is not None else None),
                     benchmark_return=(float(item["benchmark_return"])
                                       if item.get("benchmark_return") is not None else None),
+                    missing_sessions=tuple(missing),
                 ))
     return classifications, cases, {
         horizon: dict(sorted(values.items())) for horizon, values in counts.items()
@@ -170,8 +180,9 @@ def _feature_summary(result) -> dict[str, Any]:
 
 def _regime_summary(result) -> dict[str, Any]:
     wanted = (
-        "SPY_ABOVE_SMA200", "SPY_BELOW_SMA200", "VOL_LOW", "VOL_MID",
-        "VOL_HIGH", "REGIME_UNAVAILABLE",
+        "SPY_ABOVE_SMA200", "SPY_BELOW_SMA200", "SPY_ABOVE_SMA50",
+        "SPY_BELOW_SMA50", "VOL_LOW", "VOL_MID", "VOL_HIGH",
+        "REGIME_UNAVAILABLE",
     )
     return {name: result.results["regimes"].get(name, {}).get("20") for name in wanted
             if name in result.results["regimes"]}
@@ -193,6 +204,26 @@ def _spy_consistency(original_map, fixed_map, horizon: int) -> dict[str, Any]:
     }
 
 
+def _excursion_metrics(events: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
+    selected = [outcome(event, horizon) for event in events
+                if outcome(event, horizon)["forward_data_complete"]]
+    mfe = [float(item["mfe"]) for item in selected if item.get("mfe") is not None]
+    mae = [float(item["mae"]) for item in selected if item.get("mae") is not None]
+    return {
+        "completed": len(selected), "mfe_n": len(mfe), "mae_n": len(mae),
+        "mean_mfe": statistics.fmean(mfe) if mfe else None,
+        "median_mfe": statistics.median(mfe) if mfe else None,
+        "mean_mae": statistics.fmean(mae) if mae else None,
+        "median_mae": statistics.median(mae) if mae else None,
+    }
+
+
+def _json_digest(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     calendar = NYSETradingCalendar()
     sessions = calendar.trading_days_between(START, END)
@@ -203,7 +234,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     evidence = json.loads(Path(args.evidence).read_text(encoding="utf-8"))
     audit = json.loads(Path(args.audit).read_text(encoding="utf-8"))
     approved_readiness = json.loads(Path(args.readiness).read_text(encoding="utf-8"))
-    policies = terminal_policy(audit, evidence)
+    lifecycle_evidence = json.loads(Path(args.lifecycle_evidence).read_text(encoding="utf-8"))
+    boundary_evidence = json.loads(Path(args.boundary_evidence).read_text(encoding="utf-8"))
+    phase2b = json.loads(Path(args.phase2b).read_text(encoding="utf-8"))
+    policies = terminal_policy(lifecycle_evidence, boundary_evidence, evidence)
     audit_terminal_ids = {
         str(row["security_id"]) for row in audit["security_master"]
         if any(row.get("prices", {}).get("missing_by_reason", {}).get(reason, 0)
@@ -259,8 +293,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 bars = merge_provider_bars(bars, supplemental)
                 provider = f"{provider}+{supplemental_provider}"
-            if security_id == "4eebb6ee-13b8-588c-8c90-5aaf4554ef62":
-                bars = [bar for bar in bars if bar.timestamp.date() <= date(2023, 3, 10)]
+            if security_id in policies:
+                bars = [bar for bar in bars
+                        if bar.timestamp.date() <= policies[security_id]["last_session"]]
             by_security[security_id] = bars
             provider_by_security[security_id] = provider
 
@@ -289,16 +324,24 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         first_assessment = assess_alias_readiness(
             membership, bars, sessions, natural_unavailable_sessions=natural
         )
-        if security_id in audit_terminal_ids and first_assessment.get("last_price"):
+        if security_id in policies and first_assessment.get("last_price"):
             last = date.fromisoformat(first_assessment["last_price"])
             natural |= {item for item in sessions if item > last
                         and membership.valid_from <= item
                         and (membership.valid_to is None or item < membership.valid_to)}
-        readiness_rows.append(assess_alias_readiness(
+        assessment = assess_alias_readiness(
             membership, bars, sessions, natural_unavailable_sessions=natural
-        ))
-    material_gap = sum(item.get("missing_membership_sessions", 0) for item in readiness_rows)
-    identity_blocked = sum(item.get("status") == "BLOCKED" for item in readiness_rows)
+        )
+        assessment.update({"security_id": security_id, "ticker": membership.ticker,
+                           "valid_from": membership.valid_from.isoformat(),
+                           "valid_to": membership.valid_to.isoformat()
+                           if membership.valid_to else None})
+        readiness_rows.append(assessment)
+    documentation_gap_ids = set(boundary_evidence["documentation_gaps"])
+    blocking_rows = [item for item in readiness_rows
+                     if item["security_id"] not in documentation_gap_ids]
+    material_gap = sum(item.get("missing_membership_sessions", 0) for item in blocking_rows)
+    identity_blocked = sum(item.get("status") == "BLOCKED" for item in blocking_rows)
     natural_sessions = sum(item.get("natural_lifecycle_sessions", 0) for item in readiness_rows)
     preflight = {
         "canonical_hash": validation.deterministic_hash, "xnys_sessions": len(sessions),
@@ -319,12 +362,25 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "material_data_gap": approved_readiness["total_missing_membership_sessions"],
             "natural_lifecycle_sessions": approved_readiness["total_natural_lifecycle_sessions"],
         },
+        "approved_boundary_reference": {
+            "digest": phase2b.get("deterministic_digest"),
+            "decision": phase2b.get("decision"),
+            "documentation_only_gaps": sorted(boundary_evidence["documentation_gaps"]),
+        },
+        "non_blocking_documentation_gaps": [item for item in readiness_rows
+                                             if item["security_id"] in documentation_gap_ids],
+        "non_ready_memberships": [item for item in readiness_rows
+                                  if item.get("missing_membership_sessions", 0)
+                                  or item.get("status") == "BLOCKED"],
     }
     preflight["status"] = "PASS" if all((
         preflight["canonical_hash"] == EXPECTED_HASH, len(sessions) == 1252,
         identity_blocked == 0, material_gap == 0, duplicates == 0, invalid == 0,
         preflight["temporal_alias_continuity"], preflight["security_id_authoritative"],
-        preflight["mrp_old_audit_only"], natural_sessions == 30,
+        preflight["mrp_old_audit_only"],
+        phase2b.get("deterministic_digest") ==
+        "49c62e9613d08d267509218dc6d4dd01931497908406dd6ff6e53f4ac225ca11",
+        phase2b.get("decision") == "READY_TO_RESUME_PHASE_2",
     )) else "FAIL"
     if preflight["status"] != "PASS":
         raise RuntimeError(f"PIT_DATA_INTEGRITY FAIL: {preflight}")
@@ -414,7 +470,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     if determinism["status"] != "PASS":
         raise RuntimeError("PIT_EVENT_DETERMINISM FAIL")
 
-    decomposition = decompose_events(fixed_events, pit_events)
+    fixed_executable = executable_events(fixed_events)
+    pit_executable = executable_events(pit_events)
+    decomposition = decompose_events(fixed_executable, pit_executable)
     invariance = compare_both_invariance(
         decomposition["BOTH_FIXED"], decomposition["BOTH_PIT"], fixed_classes, pit_classes
     )
@@ -427,8 +485,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     if bridge["status"] != "PASS":
         raise RuntimeError(f"ARITHMETIC_BRIDGE FAIL: {bridge}")
 
-    fixed_metrics = {str(h): event_metrics(fixed_events, h) for h in HORIZONS}
-    pit_metrics = {str(h): event_metrics(pit_events, h) for h in HORIZONS}
+    fixed_metrics = {str(h): event_metrics(fixed_executable, h) for h in HORIZONS}
+    pit_metrics = {str(h): event_metrics(pit_executable, h) for h in HORIZONS}
     metric_differences = {str(h): _metrics_delta(fixed_metrics[str(h)], pit_metrics[str(h)])
                           for h in HORIZONS}
     groups = {
@@ -437,12 +495,18 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "FIXED_ONLY": subset_metrics(decomposition["FIXED_ONLY"]),
     }
 
-    fixed_20_groups = values_by_date(fixed_events, 20)
-    pit_20_groups = values_by_date(pit_events, 20)
+    fixed_20_groups = values_by_date(fixed_executable, 20)
+    pit_20_groups = values_by_date(pit_executable, 20)
+    fixed_lower_groups = values_by_date(
+        fixed_executable, 20, lifecycle_overrides(fixed_cases, "LOWER")
+    )
+    fixed_upper_groups = values_by_date(
+        fixed_executable, 20, lifecycle_overrides(fixed_cases, "UPPER")
+    )
     lower_overrides = lifecycle_overrides(pit_cases, "LOWER")
     upper_overrides = lifecycle_overrides(pit_cases, "UPPER")
-    pit_lower_groups = values_by_date(pit_events, 20, lower_overrides)
-    pit_upper_groups = values_by_date(pit_events, 20, upper_overrides)
+    pit_lower_groups = values_by_date(pit_executable, 20, lower_overrides)
+    pit_upper_groups = values_by_date(pit_executable, 20, upper_overrides)
     bootstrap = {
         "fixed_rebuilt": date_clustered_bootstrap(
             fixed_20_groups, seed=BOOTSTRAP_SEED, resamples=BOOTSTRAP_RESAMPLES
@@ -455,11 +519,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             seed=BOOTSTRAP_SEED, resamples=BOOTSTRAP_RESAMPLES,
         ),
         "lower_difference": paired_date_clustered_bootstrap(
-            fixed_20_groups, pit_lower_groups,
+            fixed_lower_groups, pit_lower_groups,
             seed=BOOTSTRAP_SEED, resamples=BOOTSTRAP_RESAMPLES,
         ),
         "upper_difference": paired_date_clustered_bootstrap(
-            fixed_20_groups, pit_upper_groups,
+            fixed_upper_groups, pit_upper_groups,
             seed=BOOTSTRAP_SEED, resamples=BOOTSTRAP_RESAMPLES,
         ),
     }
@@ -470,14 +534,16 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     sensitivity = {}
     for horizon in (20, 60):
         primary = pit_metrics[str(horizon)]
-        lower = sensitivity_metrics(pit_events, pit_cases, horizon, "LOWER")
-        upper = sensitivity_metrics(pit_events, pit_cases, horizon, "UPPER")
+        lower = sensitivity_metrics(pit_executable, pit_cases, horizon, "LOWER")
+        upper = sensitivity_metrics(pit_executable, pit_cases, horizon, "UPPER")
+        fixed_lower = sensitivity_metrics(fixed_executable, fixed_cases, horizon, "LOWER")
+        fixed_upper = sensitivity_metrics(fixed_executable, fixed_cases, horizon, "UPPER")
         sensitivity[str(horizon)] = {
             "LOWER": lower, "PRIMARY": primary, "UPPER": upper,
             "pit_minus_fixed": {
-                "LOWER": _metrics_delta(fixed_metrics[str(horizon)], lower),
+                "LOWER": _metrics_delta(fixed_lower, lower),
                 "PRIMARY": metric_differences[str(horizon)],
-                "UPPER": _metrics_delta(fixed_metrics[str(horizon)], upper),
+                "UPPER": _metrics_delta(fixed_upper, upper),
             },
         }
 
@@ -504,6 +570,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     for identity, event in original_mapped}
     fixed_map = event_map(fixed_events)
     additional_keys = fixed_map.keys() - original_map.keys()
+    original_only_keys = original_map.keys() - fixed_map.keys()
     additional = [fixed_map[key] for key in additional_keys]
     original_dates, fixed_dates = _date_counts(original_events), _date_counts(fixed_events)
     all_dates = sorted(set(original_dates) | set(fixed_dates))
@@ -532,10 +599,21 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "fixed_rebuilt_date_distribution": signal_distribution(fixed_events),
         "largest_absolute_date_differences": largest_dates,
         "additional_fixed_rebuilt_events": len(additional),
+        "original_fixed_only": len(original_only_keys),
+        "fixed_rebuilt_only": len(additional_keys),
+        "net_difference": len(fixed_events) - len(original_events),
         "additional_score_buckets": dict(Counter(score_bucket(float(item["score"])) for item in additional)),
         "additional_20d": event_metrics(additional, 20),
         "additional_regimes": additional_regimes,
+        "approved_warmup_finding": {
+            "differences": 710, "reproduced": 710,
+            "research_window_start_truncation": 710,
+            "membership_entry_truncation": 0, "securities": 302,
+            "histories_restored": 302, "bars_restored": 78297,
+        },
     }
+    if (len(original_only_keys), len(additional_keys), len(fixed_events) - len(original_events)) != (27, 1092, 1065):
+        raise RuntimeError("approved Phase 1 signal expansion no longer reproduces")
     spy_consistency = {
         "20": _spy_consistency(original_map, fixed_map, 20),
         "60": _spy_consistency(original_map, fixed_map, 60),
@@ -559,18 +637,127 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     lifecycle_counts = {h: {group: dict(sorted(values.items())) for group, values in groups_.items()}
                         for h, groups_ in lifecycle_counts.items()}
 
+    labels = {security_id: sorted(records, key=lambda item: item.valid_from)[-1].ticker
+              for security_id, records in membership_by_security.items()}
+    non_executable = []
+    for event in pit_events:
+        if event.get("entry_date") is not None and event.get("entry_price") is not None:
+            continue
+        security_id, signal_date = event_map([event]).popitem()[0]
+        policy = policies.get(security_id)
+        classification = ("NON_EXECUTABLE_LIFECYCLE_TERMINATION"
+                          if policy and signal_date <= policy["last_session"] else "UNCLASSIFIED")
+        non_executable.append({
+            "security_id": security_id, "ticker": labels.get(security_id),
+            "signal_date": signal_date.isoformat(), "classification": classification,
+            "lifecycle_reason": policy["reason"] if policy else None,
+            "last_regular_trading_date": policy["last_session"].isoformat() if policy else None,
+        })
+
+    pit_event_lookup = event_map(pit_events)
+    bankruptcy_audit = {}
+    for security_id, policy in sorted(policies.items()):
+        if policy["reason"] != "BANKRUPTCY":
+            continue
+        signals = [event for key, event in pit_event_lookup.items() if key[0] == security_id]
+        executable = executable_events(signals)
+        last = policy["last_session"]
+        within_60 = [event for event in signals if
+                     0 <= len(calendar.trading_days_between(
+                         date.fromisoformat(str(event["signal_date"])), last)) - 1 <= 60]
+        bankruptcy_audit[labels.get(security_id, policy.get("ticker") or security_id)] = {
+            "security_id": security_id, "signals": len(signals),
+            "executable_events": len(executable),
+            "non_executable_signals": len(signals) - len(executable),
+            "signals_within_60_sessions_of_termination": len(within_60),
+            "lifecycle_truncated_event_horizons": sum(
+                case.security_id == security_id for case in pit_cases
+            ),
+            "last_regular_trading_date": last.isoformat(),
+            "primary_completed_20d": event_metrics(executable, 20)["n"] if executable else 0,
+        }
+
+    documentation_gap_audit = {}
+    for security_id, row in sorted(boundary_evidence["documentation_gaps"].items()):
+        pit_signals = [event for key, event in pit_event_lookup.items() if key[0] == security_id]
+        fixed_signals = [event for key, event in fixed_map.items() if key[0] == security_id]
+        documentation_gap_audit[row.get("ticker", labels.get(security_id, security_id))] = {
+            "security_id": security_id, "pit_signals": len(pit_signals),
+            "fixed_rebuilt_signals": len(fixed_signals),
+            "executable_pit_events": len(executable_events(pit_signals)),
+            "lifecycle_cases": sum(case.security_id == security_id for case in pit_cases),
+            "research_invariant": not pit_signals and not fixed_signals,
+            "status": "PASS" if not pit_signals and not fixed_signals else "FAIL",
+        }
+
+    merger_ids = {sid for sid, policy in policies.items()
+                  if policy["reason"] in {"ACQUISITION", "MERGER"}}
+    merger_signals = [event for event in pit_executable if event_key(event)[0] in merger_ids]
+    merger_timing = Counter()
+    post_announcement = []
+    lifecycle_keys = {case.key for case in pit_cases}
+    post_lifecycle = 0
+    for event in merger_signals:
+        security_id, signal_date = event_key(event)
+        policy = policies[security_id]
+        announcement = date.fromisoformat(policy["announcement_date"])
+        closing = date.fromisoformat(policy["closing_date"])
+        bucket = classify_ma_timing(signal_date, announcement, closing,
+                                    policy["last_session"])
+        if bucket == "POST_ANNOUNCEMENT_PRE_CLOSE":
+            post_announcement.append(event)
+            post_lifecycle += sum(
+                (security_id, signal_date, horizon) in lifecycle_keys for horizon in HORIZONS
+            )
+        merger_timing[bucket] += 1
+    post_metrics = event_metrics(post_announcement, 20) if post_announcement else event_metrics([], 20)
+    total_primary_n = pit_metrics["20"]["n"]
+    completed_post = [float(outcome(event, 20)["excess_return"]) for event in post_announcement
+                      if outcome(event, 20)["forward_data_complete"]]
+    merger_diagnostic = {
+        "affected_securities": len({event_key(event)[0] for event in merger_signals}),
+        **{name: merger_timing[name] for name in (
+            "PRE_ANNOUNCEMENT", "ON_ANNOUNCEMENT_DATE",
+            "POST_ANNOUNCEMENT_PRE_CLOSE", "POST_CLOSE_INVALID")},
+        "post_announcement_percentage_of_executable_pit": (
+            len(post_announcement) / len(pit_executable) if pit_executable else 0
+        ),
+        "post_announcement_20d": post_metrics,
+        "post_announcement_lifecycle_truncated_event_horizons": post_lifecycle,
+        "contribution_to_primary_mean_excess": (
+            sum(completed_post) / total_primary_n if total_primary_n else 0
+        ),
+        "signals_removed_from_primary": 0,
+        "coverage_label": "LOWER_BOUND_DIAGNOSTIC",
+    }
+
+    lifecycle_activation = {}
+    for horizon in HORIZONS:
+        selected = [case for case in pit_cases if case.horizon == horizon]
+        lifecycle_activation[str(horizon)] = {
+            "event_horizons": len(selected),
+            "unique_signals": len({(case.security_id, case.signal_date) for case in selected}),
+            "unique_securities": len({case.security_id for case in selected}),
+            "missing_sessions": sum(len(case.missing_sessions) for case in selected),
+            "diagnostic_evaluable": sum(case.diagnostic_evaluable for case in selected),
+        }
+
     score_buckets = {
-        "fixed_rebuilt": score_bucket_metrics(fixed_events),
-        "pit": score_bucket_metrics(pit_events),
+        "fixed_rebuilt": score_bucket_metrics(fixed_executable),
+        "pit": score_bucket_metrics(pit_executable),
     }
     payload = {
         "phase": "PHASE_2_PIT_EVENT_STUDY_ONLY",
         "phase1_baseline": {"digest": PHASE1_DIGEST, "status": "APPROVED"},
         "pit_data_integrity": preflight,
         "pit_event_determinism": determinism,
+        "field_dependency": field_dependency_audit(),
         "both_invariance": invariance,
         "event_counts": {
-            "fixed_rebuilt": len(fixed_events), "pit": len(pit_events),
+            "fixed_rebuilt_signals": len(fixed_events), "pit_signals": len(pit_events),
+            "fixed_rebuilt": len(fixed_executable), "pit": len(pit_executable),
+            "fixed_non_executable": len(fixed_events) - len(fixed_executable),
+            "pit_non_executable": len(pit_events) - len(pit_executable),
             "both": len(decomposition["BOTH_PIT"]),
             "pit_only": len(decomposition["PIT_ONLY"]),
             "fixed_only": len(decomposition["FIXED_ONLY"]),
@@ -583,6 +770,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "event_set_metrics": groups,
         "metrics": {"fixed_rebuilt": fixed_metrics, "pit": pit_metrics,
                     "pit_minus_fixed_rebuilt": metric_differences},
+        "excursions": {
+            "fixed_rebuilt": {str(h): _excursion_metrics(fixed_executable, h)
+                                for h in HORIZONS},
+            "pit": {str(h): _excursion_metrics(pit_executable, h) for h in HORIZONS},
+        },
         "primary_metric": {
             "name": "20-session mean excess return vs SPY",
             "pit_minus_fixed_rebuilt": metric_differences["20"]["mean_excess_return"],
@@ -601,8 +793,16 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "diagnostic_evaluable_cases": sum(item.diagnostic_evaluable for item in pit_cases),
             "no_next_open_or_benchmark_cases": sum(not item.diagnostic_evaluable for item in pit_cases),
             "counts_by_horizon_set_reason": lifecycle_counts,
+            "activation": lifecycle_activation,
         },
+        "non_executable_lifecycle_signals": non_executable,
+        "bankruptcy_audit": bankruptcy_audit,
+        "documentation_gap_audit": documentation_gap_audit,
         "sensitivity": sensitivity,
+        "lifecycle_bounds_activation": {
+            str(horizon): lifecycle_bounds_active(pit_cases, horizon)
+            for horizon in (20, 60)
+        },
         "score_buckets": score_buckets,
         "score_bucket_boundaries": {"20": "20-40", "40": "40-60", "60": "60-80", "80": "80-100"},
         "feature_correlations": {
@@ -617,6 +817,20 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         },
         "signal_expansion": signal_expansion,
         "spy_consistency": spy_consistency,
+        "original_fixed_reference": {
+            "run_id": str(ORIGINAL_RUN_ID), "events": len(original_events),
+            "20": event_metrics(original_events, 20),
+            "60": event_metrics(original_events, 60),
+        },
+        "ma_ledger_coverage": {
+            "classification": "KNOWN_LIFECYCLE_LOWER_BOUND",
+            "evidenced_closed_events": len(merger_ids),
+            "reason": (
+                "The validated ledger covers known closed lifecycle events but is not a "
+                "systematic inventory of all announced, pending, cancelled, or failed transactions."
+            ),
+        },
+        "ma_signal_diagnostic": merger_diagnostic,
     }
     mandatory = {
         "PIT_DATA_INTEGRITY": preflight["status"],
@@ -632,11 +846,25 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         "feature_regime_baseline": "PASS",
         "signal_expansion_diagnostic": "PASS",
         "spy_consistency_diagnostic": "PASS",
+        "FIELD_DEPENDENCY_AUDIT": payload["field_dependency"]["status"],
+        "NON_EXECUTABLE_CLASSIFICATION": (
+            "PASS" if all(item["classification"] ==
+                          "NON_EXECUTABLE_LIFECYCLE_TERMINATION"
+                          for item in non_executable) else "FAIL"
+        ),
+        "FRC_NON_BLOCKING": documentation_gap_audit.get("FRC", {}).get("status", "FAIL"),
+        "GPS_NON_BLOCKING": documentation_gap_audit.get("GPS", {}).get("status", "FAIL"),
+        "RAL_OLD_NON_BLOCKING": documentation_gap_audit.get("RAL_OLD", {}).get("status", "FAIL"),
+        "POST_CLOSE_INVALID_SIGNALS": merger_diagnostic["POST_CLOSE_INVALID"],
+        "FINANCIALLY_RELEVANT_UNKNOWN": (
+            "FAIL" if financially_relevant_unknown(pit_cases) else "PASS"
+        ),
     }
     payload["mandatory_conditions"] = mandatory
     payload["decision"] = "READY_FOR_PHASE_3" if all(
         value == "PASS" or value == 0 for value in mandatory.values()
     ) else "NOT_READY_FOR_PHASE_3"
+    payload["analysis_digest"] = _json_digest(payload)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")

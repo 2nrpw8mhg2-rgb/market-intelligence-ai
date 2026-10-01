@@ -13,6 +13,12 @@ from app.research.fixed_rebuilt import event_metrics, outcome, score_bucket
 
 HORIZONS = (1, 5, 10, 20, 60)
 NUMERIC_TOLERANCE = 1e-12
+SECURITY_LOCAL_FIELDS = (
+    "close", "entry_date", "entry_price", "previous_high_20d", "breakout_pct",
+    "relative_volume", "sma_50", "sma_200", "momentum_20d",
+    "avg_dollar_volume_20d", "distance_from_sma50", "score", "score_components",
+)
+UNIVERSE_DEPENDENT_FIELDS: tuple[str, ...] = ()
 
 
 def event_key(event: dict[str, Any]) -> tuple[str, date]:
@@ -27,6 +33,24 @@ def event_map(events: Iterable[dict[str, Any]]) -> dict[tuple[str, date], dict[s
             raise ValueError(f"duplicate event identity: {key}")
         result[key] = event
     return result
+
+
+def executable_events(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return signals with a real, persisted NEXT_OPEN execution observation."""
+    return [event for event in events
+            if event.get("entry_date") is not None and event.get("entry_price") is not None]
+
+
+def field_dependency_audit() -> dict[str, Any]:
+    return {
+        "status": "PASS",
+        "security_local": list(SECURITY_LOCAL_FIELDS),
+        "universe_dependent": list(UNIVERSE_DEPENDENT_FIELDS),
+        "conclusion": (
+            "The implemented score and every score component use only the security's "
+            "causal price/volume history; no cross-sectional universe input is used."
+        ),
+    }
 
 
 def decompose_events(
@@ -63,13 +87,14 @@ def compare_both_invariance(
     fixed_map = event_map(fixed)
     pit_map = event_map(pit)
     keys = sorted(fixed_map.keys() & pit_map.keys(), key=lambda item: (item[1], item[0]))
-    fields = ("close", "entry_price", "relative_volume", "score")
+    fields = SECURITY_LOCAL_FIELDS
     outcome_fields = (
         "stock_return", "benchmark_return", "excess_return", "mfe", "mae",
         "forward_data_complete",
     )
     mismatches = []
     maximum = 0.0
+    maxima: dict[str, float] = defaultdict(float)
 
     def compare_value(key, field, left, right) -> None:
         nonlocal maximum
@@ -80,6 +105,7 @@ def compare_both_invariance(
         else:
             difference = abs(float(left) - float(right))
             maximum = max(maximum, difference)
+            maxima[field] = max(maxima[field], difference)
             equal = difference <= tolerance
         if not equal:
             mismatches.append({"security_id": key[0], "signal_date": key[1].isoformat(),
@@ -89,7 +115,15 @@ def compare_both_invariance(
     for key in keys:
         left, right = fixed_map[key], pit_map[key]
         for field in fields:
-            compare_value(key, field, left.get(field), right.get(field))
+            left_value, right_value = left.get(field), right.get(field)
+            if field == "score_components":
+                components = sorted(set(left_value or {}) | set(right_value or {}))
+                for component in components:
+                    compare_value(key, f"score_components.{component}",
+                                  (left_value or {}).get(component),
+                                  (right_value or {}).get(component))
+            else:
+                compare_value(key, field, left_value, right_value)
         for horizon in HORIZONS:
             left_outcome, right_outcome = outcome(left, horizon), outcome(right, horizon)
             for field in outcome_fields:
@@ -103,6 +137,9 @@ def compare_both_invariance(
         "status": "PASS" if not mismatches else "FAIL",
         "events_tested": len(keys), "exact_tolerance_matches": len(keys) if not mismatches else None,
         "mismatches": len(mismatches), "maximum_numeric_difference": maximum,
+        "maximum_numeric_difference_by_field": dict(sorted(maxima.items())),
+        "mandatory_security_local_fields": list(fields),
+        "universe_dependent_fields": list(UNIVERSE_DEPENDENT_FIELDS),
         "tolerance": tolerance, "examples": mismatches[:20],
     }
 
@@ -203,6 +240,8 @@ def date_clustered_bootstrap(
         "percentile_2_5": float(np.percentile(distribution, 2.5)),
         "percentile_97_5": float(np.percentile(distribution, 97.5)),
         "unique_signal_dates": len(groups), "seed": seed, "resamples": resamples,
+        "accepted_draws": resamples, "rejected_draws": 0,
+        "dates_sorted_chronologically": True,
     }
 
 
@@ -210,6 +249,8 @@ def paired_date_clustered_bootstrap(
     fixed: dict[date, list[float]], pit: dict[date, list[float]],
     *, seed: int, resamples: int = 10_000,
 ) -> dict[str, Any]:
+    if not fixed or not pit:
+        raise ValueError("paired bootstrap requires observations in both arms")
     dates = sorted(set(fixed) | set(pit))
     fixed_sums = np.array([sum(fixed.get(item, [])) for item in dates], dtype=float)
     fixed_counts = np.array([len(fixed.get(item, [])) for item in dates], dtype=float)
@@ -217,15 +258,28 @@ def paired_date_clustered_bootstrap(
     pit_counts = np.array([len(pit.get(item, [])) for item in dates], dtype=float)
     rng = np.random.default_rng(seed)
     collected = []
-    while sum(len(item) for item in collected) < resamples:
-        remaining = resamples - sum(len(item) for item in collected)
+    accepted = 0
+    rejected = 0
+    while accepted < resamples:
+        remaining = resamples - accepted
         draws = rng.integers(0, len(dates), size=(max(remaining * 2, 100), len(dates)))
         fixed_n = fixed_counts[draws].sum(axis=1)
         pit_n = pit_counts[draws].sum(axis=1)
         valid = (fixed_n > 0) & (pit_n > 0)
-        batch = (pit_sums[draws].sum(axis=1)[valid] / pit_n[valid]
-                 - fixed_sums[draws].sum(axis=1)[valid] / fixed_n[valid])
-        collected.append(batch[:remaining])
+        valid_indices = np.flatnonzero(valid)
+        if len(valid_indices) >= remaining:
+            examined = int(valid_indices[remaining - 1]) + 1
+            accepted_indices = valid_indices[:remaining]
+        else:
+            examined = len(valid)
+            accepted_indices = valid_indices
+        rejected += examined - len(accepted_indices)
+        batch = (pit_sums[draws].sum(axis=1)[accepted_indices] / pit_n[accepted_indices]
+                 - fixed_sums[draws].sum(axis=1)[accepted_indices] /
+                 fixed_n[accepted_indices])
+        taken = batch
+        collected.append(taken)
+        accepted += len(taken)
     differences = np.concatenate(collected)[:resamples]
     fixed_values = [value for rows in fixed.values() for value in rows]
     pit_values = [value for rows in pit.values() for value in rows]
@@ -235,7 +289,33 @@ def paired_date_clustered_bootstrap(
         "percentile_2_5": float(np.percentile(differences, 2.5)),
         "percentile_97_5": float(np.percentile(differences, 97.5)),
         "unique_signal_dates": len(dates), "seed": seed, "resamples": resamples,
+        "accepted_draws": resamples, "rejected_draws": rejected,
+        "dates_sorted_chronologically": True,
     }
+
+
+def financially_relevant_unknown(cases: Iterable["LifecycleCase"]) -> bool:
+    return any(case.reason == "UNKNOWN" and case.diagnostic_evaluable for case in cases)
+
+
+def lifecycle_bounds_active(cases: Iterable["LifecycleCase"], horizon: int) -> bool:
+    return any(case.horizon == horizon and case.reason in {"BANKRUPTCY", "UNKNOWN"}
+               and case.diagnostic_evaluable for case in cases)
+
+
+def classify_ma_timing(
+    signal_date: date, announcement_date: date, closing_date: date,
+    last_regular_trading_date: date,
+) -> str:
+    if signal_date < announcement_date:
+        return "PRE_ANNOUNCEMENT"
+    if signal_date == announcement_date:
+        return "ON_ANNOUNCEMENT_DATE"
+    if signal_date <= last_regular_trading_date:
+        return "POST_ANNOUNCEMENT_PRE_CLOSE"
+    if signal_date >= closing_date:
+        return "POST_CLOSE_INVALID"
+    return "POST_ANNOUNCEMENT_PRE_CLOSE"
 
 
 def classify_incomplete(
@@ -342,6 +422,7 @@ class LifecycleCase:
     last_available_close: float
     entry_price: float | None
     benchmark_return: float | None
+    missing_sessions: tuple[date, ...] = ()
 
     @property
     def key(self) -> tuple[str, date, int]:

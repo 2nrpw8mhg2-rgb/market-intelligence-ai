@@ -932,3 +932,272 @@ Deterministic Phase 2B digest:
 **READY_TO_RESUME_PHASE_2**
 
 This status authorizes human review only. Financial Phase 2 was not resumed.
+
+## 41. PHASE 2 — PIT EVENT STUDY
+
+### 41.1 Pre-registered scope and integrity
+
+This is the first authorized PIT financial event study. The research window is
+2021-09-27 through 2026-09-22 (1,252 XNYS sessions), the entry convention is
+`NEXT_OPEN`, and the primary comparison is PIT minus FIXED_REBUILT 20-session
+mean excess return versus SPY. No methodology was changed after observing the
+financial results.
+
+| Mandatory gate | Result |
+|---|---:|
+| `PIT_DATA_INTEGRITY` | `PASS` |
+| Canonical universe hash | `74d14b5198a7e64e91127abbbdcaae087e8c9134f6e8f6786446c210e2529b4d` |
+| Phase 2B digest | `49c62e9613d08d267509218dc6d4dd01931497908406dd6ff6e53f4ac225ca11` |
+| `PRE_MEMBERSHIP_WARMUP_AUDIT` | `PASS` |
+| `SYMMETRIC_MEMBERSHIP_BOUNDARY_AUDIT` | `PASS` |
+| `IDENTITY_BLOCKED` | 0 |
+| `MATERIAL_DATA_GAP` | 0 |
+| `GENUINE_MISSING_DATA` | 0 |
+| duplicate logical bars / invalid OHLCV | 0 / 0 |
+| ticker-only fallback / ticker-reuse leakage | 0 / 0 |
+| synthetic / forward-filled / interpolated prices | 0 / 0 / 0 |
+
+`security_id` remained authoritative. The three approved documentation-only
+gaps (FRC, GPS and RAL_OLD) remained visible and were revalidated below.
+
+### 41.2 Field dependency and BOTH invariance
+
+Inspection of the implementation established that close, entry, breakout,
+relative volume, moving averages, momentum, liquidity, distance from SMA50,
+score and every score component are `SECURITY_LOCAL`. There are no implemented
+`UNIVERSE_DEPENDENT` score fields.
+
+The 5,118 executable events present in both datasets matched exactly for every
+mandatory security-local input, score component, entry, stock/SPY/excess
+return, MFE, MAE, completeness and lifecycle classification across all five
+horizons. Maximum numeric difference was 0.0 at tolerance `1e-12`.
+
+**BOTH_INVARIANCE = PASS**
+
+### 41.3 Signals, executable events and matching
+
+| Population | Signals | Executable events | Non-executable |
+|---|---:|---:|---:|
+| FIXED_REBUILT | 5,896 | 5,896 | 0 |
+| PIT | 5,398 | 5,395 | 3 |
+
+Executable matching by `(security_id, signal_date)` produced:
+
+| Set | Events | Securities | Signal dates |
+|---|---:|---:|---:|
+| BOTH | 5,118 | 483 | 963 |
+| FIXED_ONLY | 778 | 65 | 445 |
+| PIT_ONLY | 277 | 62 | 207 |
+
+The three signals without a legitimate next open were TWTR on 2022-10-27,
+DAY on 2026-02-03 and HOLX on 2026-04-06. Each occurred on the final regular
+trading session and is classified `NON_EXECUTABLE_LIFECYCLE_TERMINATION`; no
+entry or terminal price was fabricated.
+
+### 41.4 Pre-registered primary result
+
+| Dataset | Completed N | Mean return | Median return | Mean excess | Median excess | Positive rate |
+|---|---:|---:|---:|---:|---:|---:|
+| FIXED_REBUILT | 5,849 | 1.694411% | 0.956689% | 0.722058% | -0.118909% | 55.2915% |
+| PIT | 5,330 | 1.091452% | 0.652141% | 0.119428% | -0.322920% | 54.2214% |
+
+**PIT minus FIXED_REBUILT 20-session mean excess = -0.602630 percentage
+points = -60.2630 bp.**
+
+The date-clustered bootstrap used chronological signal-date clusters, seed
+`20260929`, and exactly 10,000 accepted draws:
+
+| Estimate | Point | 2.5% | 97.5% | Rejected draws |
+|---|---:|---:|---:|---:|
+| FIXED_REBUILT mean excess | 0.722058% | 0.353472% | 1.087179% | 0 |
+| PIT mean excess | 0.119428% | -0.221085% | 0.463487% | 0 |
+| PIT minus FIXED_REBUILT | -0.602630% | -0.777867% | -0.428460% | 0 |
+
+These intervals quantify event-study sampling uncertainty; they do not prove a
+causal universe effect or future expected return.
+
+### 41.5 Event-set decomposition and arithmetic bridge
+
+| Set | Completed N (20d) | Mean return | Median return | Mean excess | Median excess |
+|---|---:|---:|---:|---:|---:|
+| BOTH | 5,073 | 1.136720% | 0.706827% | 0.169185% | -0.308226% |
+| FIXED_ONLY | 776 | 5.340246% | 3.394543% | 4.336390% | 2.034957% |
+| PIT_ONLY | 257 | 0.197897% | 0.133227% | -0.862747% | -0.969495% |
+
+The count-weighted bridge reconciles exactly:
+
+- FIXED_REBUILT mean excess: 0.722058%.
+- Removing FIXED_ONLY: -0.552872 percentage points.
+- BOTH intermediate mean: 0.169185%.
+- Adding PIT_ONLY: -0.049757 percentage points.
+- PIT mean excess: 0.119428%.
+- Total: -0.602630 percentage points; reconciliation error 0.0.
+
+**ARITHMETIC_BRIDGE = PASS**
+
+### 41.6 Lifecycle sensitivity
+
+PRIMARY excludes lifecycle-truncated horizons. LOWER uses -100% only for an
+evaluable bankruptcy or unknown termination; UPPER uses the last legitimate
+close. Acquisition, merger and other evidenced delisting cases use the last
+legitimate close in both diagnostic bounds.
+
+| Horizon | Treatment | PIT N | PIT mean return | PIT mean excess | PIT−FIXED mean excess |
+|---:|---|---:|---:|---:|---:|
+| 20 | LOWER | 5,350 | 1.094158% | 0.122963% | -0.599095% |
+| 20 | PRIMARY | 5,330 | 1.091452% | 0.119428% | -0.602630% |
+| 20 | UPPER | 5,350 | 1.094158% | 0.122963% | -0.599095% |
+| 60 | LOWER | 5,217 | 2.501210% | 0.169520% | -1.876559% |
+| 60 | PRIMARY | 5,193 | 2.507606% | 0.174922% | -1.871157% |
+| 60 | UPPER | 5,217 | 2.501210% | 0.169520% | -1.876559% |
+
+The bankruptcy/UNKNOWN bound did not activate at 20 or 60 sessions. LOWER and
+UPPER therefore coincide; this is inactivity, not evidence of robustness. The
+20-session bound-difference bootstrap interval was [-0.780027%, -0.426096%]
+with 10,000 accepted and 0 rejected draws.
+
+Bankruptcy audit:
+
+| Security | PIT signals | Executable | Within 60 sessions of termination | Lifecycle-truncated horizons |
+|---|---:|---:|---:|---:|
+| FRC | 0 | 0 | 0 | 0 |
+| SBNY | 0 | 0 | 0 | 0 |
+| SIVB | 2 | 2 | 0 | 0 |
+
+FRC cannot affect any feature, signal, NEXT_OPEN, horizon, or sensitivity
+result. No FRCB price and no successor-security price was joined.
+
+### 41.7 Secondary horizons, completeness and excursions
+
+| Horizon | FIXED N | FIXED mean return | FIXED mean excess | PIT N | PIT mean return | PIT mean excess | Difference in mean excess |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 5,896 | 0.006502% | 0.017054% | 5,395 | -0.021949% | -0.002259% | -0.019313% |
+| 5 | 5,882 | 0.311396% | 0.151870% | 5,377 | 0.206137% | 0.050351% | -0.101519% |
+| 10 | 5,870 | 0.773380% | 0.293297% | 5,360 | 0.481264% | 0.002428% | -0.290868% |
+| 20 | 5,849 | 1.694411% | 0.722058% | 5,330 | 1.091452% | 0.119428% | -0.602630% |
+| 60 | 5,713 | 4.382569% | 2.046079% | 5,193 | 2.507606% | 0.174922% | -1.871157% |
+
+Mean MFE / mean MAE were respectively 3.6634% / -3.3636% (FIXED) and
+3.3386% / -3.1489% (PIT) at 5d; 5.2379% / -4.4886% and 4.6638% / -4.2349%
+at 10d; 7.8603% / -6.0430% and 6.8477% / -5.7480% at 20d; and 15.5583% /
+-10.2615% and 12.9172% / -9.9387% at 60d. The established engine does not
+define one-session MFE/MAE, so their N is zero rather than fabricated.
+
+Research-window truncations for FIXED/PIT were 0/0 (1d), 14/13 (5d), 26/25
+(10d), 47/45 (20d), and 183/178 (60d). Lifecycle truncations in PIT were 3,
+8, 13, 23 and 27 respectively. All 74 lifecycle event-horizons were PIT_ONLY:
+72 acquisition and 2 merger classifications; 59 were diagnostically evaluable.
+No lifecycle truncation was silently reclassified as ordinary missing data.
+
+### 41.8 Score and feature diagnostics
+
+| Score bucket | FIXED N | FIXED mean return | FIXED mean excess | PIT N | PIT mean return | PIT mean excess |
+|---|---:|---:|---:|---:|---:|---:|
+| 0–20 | 357 | 1.283632% | 0.061850% | 361 | 0.985740% | -0.188060% |
+| 20–40 | 3,176 | 0.926684% | 0.103915% | 3,046 | 0.783146% | -0.067812% |
+| 40–60 | 1,558 | 1.907690% | 0.873085% | 1,347 | 1.124760% | 0.064445% |
+| 60–80 | 510 | 4.498760% | 3.161865% | 396 | 2.676381% | 1.390226% |
+| 80–100 | 248 | 5.010722% | 3.622516% | 180 | 2.784601% | 1.520333% |
+
+Exact boundary convention is 20→20–40, 40→40–60, 60→60–80 and 80→80–100.
+The score remains descriptive and was not recalibrated.
+
+Pearson/Spearman correlations with 20-session return (FIXED, PIT) were:
+
+| Feature | FIXED Pearson / Spearman | PIT Pearson / Spearman |
+|---|---:|---:|
+| breakout strength | 0.08776 / 0.03500 | 0.05466 / 0.01837 |
+| distance from SMA50 | 0.15155 / 0.04882 | 0.09808 / 0.01166 |
+| liquidity | 0.05584 / 0.03518 | 0.05484 / 0.04326 |
+| momentum | 0.15181 / 0.04755 | 0.10619 / 0.01574 |
+| relative volume | 0.02620 / 0.01266 | -0.00994 / -0.00390 |
+
+Samples were 5,855 FIXED and 5,336 PIT observations. These are retrospective
+diagnostics, not weight-optimization evidence.
+
+### 41.9 Causal market regimes
+
+| Regime | FIXED N / mean return / mean excess | PIT N / mean return / mean excess |
+|---|---:|---:|
+| Above SMA200 | 4,819 / 1.8404% / 0.7433% | 4,359 / 1.1567% / 0.0611% |
+| Below SMA200 | 320 / 2.2911% / 0.0987% | 281 / 1.3379% / -0.8096% |
+| Above SMA50 | 4,364 / 1.9409% / 0.9047% | 3,907 / 1.1682% / 0.1675% |
+| Below SMA50 | 775 / 1.4596% / -0.4317% | 733 / 1.1646% / -0.8396% |
+| Low volatility | 3,040 / 1.9452% / 0.9348% | 2,738 / 1.3600% / 0.3504% |
+| Medium volatility | 1,744 / 1.5989% / 0.3336% | 1,583 / 0.8244% / -0.4773% |
+| High volatility | 355 / 2.5337% / 0.5345% | 319 / 1.2169% / -0.5170% |
+
+Volatility uses the existing causal 20-session annualized realized-volatility
+definition and expanding terciles based only on prior observations.
+
+### 41.10 Phase 1 signal expansion and SPY consistency
+
+ORIGINAL_FIXED had 4,831 events and FIXED_REBUILT 5,896: 27 original-only,
+1,092 rebuilt-only, net +1,065. The rebuilt-only sample had 1,091 completed
+20d outcomes, 0.441351% mean return, 0.445337% median return, 0.372660% mean
+excess and -0.171145% median excess. Its score counts were 100, 644, 247, 75
+and 26 across the five score buckets. Regime clustering included 710
+`REGIME_UNAVAILABLE` events from the approved start-window warm-up effect.
+
+The 710/710 warm-up differences remain attributable to research-window-start
+truncation, not membership-entry truncation (0). The approved 302 securities,
+302 histories and 78,297 restored bars remain unchanged.
+
+SPY consistency on matched ORIGINAL/FIXED events:
+
+| Horizon | Compared | >1 bp | Percentage | Median absolute diff | Maximum diff |
+|---:|---:|---:|---:|---:|---:|
+| 20 | 4,758 | 0 | 0% | 0 | 0 |
+| 60 | 4,633 | 0 | 0% | 0 | 0 |
+
+Thus the approved 60d infrastructure pattern is supported by equity-history and
+event-composition changes, not a different SPY series.
+
+### 41.11 M&A diagnostics
+
+Ledger coverage is **KNOWN_LIFECYCLE_LOWER_BOUND**: the 35 evidenced closed
+acquisition/merger events are validated, but the ledger is not a systematic
+inventory of every announced, pending, cancelled or failed transaction.
+
+Across 27 affected securities there were 87 pre-announcement signals, 6 on the
+announcement date, 69 post-announcement/pre-close signals and 0 post-close
+invalid signals. The post-announcement/pre-close group represented 1.2790% of
+executable PIT events; 49 had complete 20d outcomes, with 1.229060% mean return
+and -0.432834% mean excess. There were 59 lifecycle-truncated event-horizons.
+Its contribution to the ordinary PRIMARY completed-event mean excess was
+-0.003979 percentage points. Counts are lower-bound diagnostics. No M&A signal
+was removed from PRIMARY.
+
+### 41.12 Documentation gaps, determinism, tests and decision
+
+FRC, GPS and RAL_OLD each produced zero PIT signals, zero executable PIT events
+and zero lifecycle cases; each research-invariance revalidation is `PASS`.
+
+The complete pipeline ran twice. Signal/event counts, matching, completeness,
+lifecycle classifications, PRIMARY/LOWER/UPPER results, arithmetic bridge,
+bootstrap outputs and rejection counts, score buckets, feature correlations,
+regimes and M&A counts were byte-identical.
+
+- Analysis digest: `ed33baca754eb93a6cbe6c898037e9eb8c5734f2762aeb3d8f3d821fdf5cf814`.
+- Complete artefact SHA-256: `e86c01a3f90573b628d4b9f5096515df80eeeab09684d98f00056d6512084bfc`.
+- `PIT_EVENT_DETERMINISM = PASS`.
+- Tests: 233 passed, 0 failed (16 added relative to the 217-test baseline).
+- One unchanged external Starlette/httpx deprecation warning.
+
+Limitations: the PIT correction does not prove alpha; no random-entry or
+generic-trend control has been run; no causal claim is made; historical returns
+are not future expected returns; overlapping events complicate event-study
+interpretation; M&A signals may represent a different economic mechanism;
+PRIMARY exclusion of lifecycle-truncated horizons can create lifecycle-survival
+selection; M&A counts are lower bounds; coincident inactive bounds are not
+evidence of robustness.
+
+All mandatory gates passed. No portfolio simulation, CAGR, Sharpe, Sortino or
+Calmar was calculated. No optimization, strategy/threshold/score change,
+M&A/bankruptcy exclusion, synthetic price, forward-fill, interpolation,
+successor substitution, fabricated NEXT_OPEN or fabricated terminal value was
+introduced.
+
+**READY_FOR_PHASE_3**
+
+This is a readiness conclusion only. Phase 3 was not started.

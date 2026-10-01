@@ -4,10 +4,12 @@ import pytest
 
 from app.research.fixed_rebuilt import score_bucket
 from app.research.pit_phase2 import (
-    LifecycleCase, arithmetic_bridge, classify_incomplete, compare_both_invariance,
+    LifecycleCase, arithmetic_bridge, classify_incomplete, classify_ma_timing,
+    compare_both_invariance,
     date_clustered_bootstrap, decompose_events, deterministic_phase2_digest,
-    genuine_missing_inventory, lifecycle_overrides, paired_date_clustered_bootstrap,
-    sensitivity_metrics,
+    executable_events, field_dependency_audit, financially_relevant_unknown,
+    genuine_missing_inventory, lifecycle_bounds_active, lifecycle_overrides,
+    paired_date_clustered_bootstrap, sensitivity_metrics,
 )
 
 
@@ -15,7 +17,13 @@ def event(security_id: str, when: str, excess: float = .1, stock: float = .2,
           score: float = 50) -> dict:
     return {
         "ticker": security_id, "signal_date": when, "close": 100,
-        "entry_price": 101, "relative_volume": 2, "score": score,
+        "entry_date": "2024-01-03", "entry_price": 101,
+        "previous_high_20d": 99, "breakout_pct": .01,
+        "relative_volume": 2, "sma_50": 90, "sma_200": 80,
+        "momentum_20d": .1, "avg_dollar_volume_20d": 20_000_000,
+        "distance_from_sma50": .1, "score": score,
+        "score_components": {"breakout": 10, "relative_volume": 10,
+                             "momentum": 10, "trend": 10, "liquidity": 10},
         "outcomes": [{
             "horizon": horizon, "stock_return": stock,
             "benchmark_return": stock - excess, "excess_return": excess,
@@ -43,6 +51,37 @@ def test_both_invariance_checks_all_financial_fields_and_lifecycle() -> None:
     assert result["events_tested"] == 1
     pit[0]["outcomes"][3]["stock_return"] += 1e-5
     assert compare_both_invariance(fixed, pit)["status"] == "FAIL"
+
+
+def test_field_dependency_marks_score_components_security_local() -> None:
+    audit = field_dependency_audit()
+    assert audit["status"] == "PASS"
+    assert "score_components" in audit["security_local"]
+    assert audit["universe_dependent"] == []
+
+
+@pytest.mark.parametrize("field", ["entry_price", "close", "score", "relative_volume"])
+def test_mandatory_both_field_difference_fails(field: str) -> None:
+    fixed = [event("security-a", "2024-01-02")]
+    pit = [event("security-a", "2024-01-02")]
+    pit[0][field] += 1
+    assert compare_both_invariance(fixed, pit)["status"] == "FAIL"
+
+
+def test_score_component_difference_is_not_excluded_from_both_invariance() -> None:
+    fixed = [event("security-a", "2024-01-02")]
+    pit = [event("security-a", "2024-01-02")]
+    pit[0]["score_components"]["momentum"] += 1
+    result = compare_both_invariance(fixed, pit)
+    assert result["status"] == "FAIL"
+    assert result["examples"][0]["field"] == "score_components.momentum"
+
+
+def test_non_executable_signal_is_visible_but_not_an_event() -> None:
+    signal = event("terminated", "2024-01-02")
+    signal["entry_date"] = None
+    signal["entry_price"] = None
+    assert executable_events([signal]) == []
 
 
 def test_arithmetic_bridge_reconciles_exact_count_weighted_difference() -> None:
@@ -101,6 +140,25 @@ def test_lifecycle_case_without_next_open_is_audit_only() -> None:
     assert lifecycle_overrides([case], "UPPER") == {}
 
 
+def test_financially_relevant_unknown_triggers_stop_only_when_evaluable() -> None:
+    relevant = LifecycleCase("x", date(2024, 1, 2), 20, "UNKNOWN", 50, 100, .01)
+    audit_only = LifecycleCase("y", date(2024, 1, 2), 20, "UNKNOWN", 50, None, None)
+    assert financially_relevant_unknown([relevant])
+    assert not financially_relevant_unknown([audit_only])
+
+
+def test_bounds_inactive_without_bankruptcy_or_unknown() -> None:
+    acquired = LifecycleCase("x", date(2024, 1, 2), 20, "ACQUISITION", 50, 100, .01)
+    assert not lifecycle_bounds_active([acquired], 20)
+    assert lifecycle_overrides([acquired], "LOWER") == lifecycle_overrides([acquired], "UPPER")
+
+
+def test_bounds_activate_for_evaluable_bankruptcy_at_selected_horizon() -> None:
+    case = LifecycleCase("x", date(2024, 1, 2), 20, "BANKRUPTCY", 50, 100, .01)
+    assert lifecycle_bounds_active([case], 20)
+    assert not lifecycle_bounds_active([case], 60)
+
+
 def test_sensitivity_adds_only_lifecycle_cases_not_window_truncation() -> None:
     incomplete = event("bankrupt", "2024-01-02")
     incomplete["outcomes"][3].update({"stock_return": None, "excess_return": None,
@@ -118,6 +176,9 @@ def test_date_clustered_bootstrap_is_seeded_and_keeps_date_clusters() -> None:
     assert first == second
     assert first["unique_signal_dates"] == 2
     assert first["point_estimate"] == pytest.approx((.1 + .2 - .1) / 3)
+    assert first["accepted_draws"] == 500
+    assert first["rejected_draws"] == 0
+    assert first["dates_sorted_chronologically"] is True
 
 
 def test_paired_bootstrap_uses_aligned_union_of_dates_and_fixed_seed() -> None:
@@ -128,6 +189,32 @@ def test_paired_bootstrap_uses_aligned_union_of_dates_and_fixed_seed() -> None:
     assert first == second
     assert first["unique_signal_dates"] == 3
     assert first["point_estimate"] == pytest.approx(.2)
+
+
+def test_paired_bootstrap_rejects_empty_arm_draws_and_continues_prng() -> None:
+    fixed = {date(2024, 1, 2): [.1]}
+    pit = {date(2024, 1, 3): [.2]}
+    first = paired_date_clustered_bootstrap(fixed, pit, seed=11, resamples=10_000)
+    second = paired_date_clustered_bootstrap(fixed, pit, seed=11, resamples=10_000)
+    assert first == second
+    assert first["accepted_draws"] == 10_000
+    assert first["rejected_draws"] > 0
+
+
+def test_paired_bootstrap_rejects_entirely_empty_arm() -> None:
+    with pytest.raises(ValueError, match="both arms"):
+        paired_date_clustered_bootstrap({}, {date(2024, 1, 2): [.1]}, seed=1)
+
+
+@pytest.mark.parametrize(("signal", "expected"), [
+    (date(2024, 1, 1), "PRE_ANNOUNCEMENT"),
+    (date(2024, 1, 2), "ON_ANNOUNCEMENT_DATE"),
+    (date(2024, 1, 3), "POST_ANNOUNCEMENT_PRE_CLOSE"),
+    (date(2024, 1, 5), "POST_CLOSE_INVALID"),
+])
+def test_ma_timing_classification(signal: date, expected: str) -> None:
+    assert classify_ma_timing(signal, date(2024, 1, 2), date(2024, 1, 5),
+                              date(2024, 1, 4)) == expected
 
 
 def test_score_boundaries_and_phase2_digest_are_deterministic() -> None:
