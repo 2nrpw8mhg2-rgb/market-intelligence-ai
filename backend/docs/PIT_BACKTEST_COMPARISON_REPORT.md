@@ -1761,3 +1761,339 @@ Closed-trade-ledger concentration was independently reconciled. Top-10 and
 bottom-10 sets have zero overlap in each portfolio. Accounting, slippage and
 portfolio determinism remain `PASS`; all approved Phase 3B financial values
 and both deterministic digests reproduced exactly at documented precision.
+
+## 44. PHASE 3C — ATTRIBUTION & DIAGNOSTICS
+
+### 44.1 Scope, checkpoint and evidence classes
+
+Phase 3C used the approved `v0.9.2-pit-portfolio-primary` checkpoint at commit
+`d49765bd7c493ed79f6ef8b90a8be997a5e0c89b`. The preflight, Phase 2 integrity
+gates, canonical PIT hash, Phase 2 analytical digest and artifact SHA-256 all
+passed. The approved signal counts remained 5,896 FIXED_REBUILT executable,
+5,398 PIT total, 5,395 PIT executable, three PIT non-executable, 5,118 BOTH,
+778 FIXED_ONLY and 277 PIT_ONLY.
+
+The frozen Phase 3B results reproduced exactly: FIXED_REBUILT CAGR 33.062544%,
+PIT CAGR 19.571826%, and PIT minus FIXED_REBUILT -13.490718 percentage points
+per year. Their portfolio digests remain respectively
+`10218057ef650912625afd612ce52047241971df59dc233d3051ceb7d6fd4bc2` and
+`5c6a0e5edf2d51f56ba2f456f978aadd8dcf550061a15cb970da90fbc2026792`.
+
+Results below are explicitly classified as `OBSERVED_FACT`,
+`DESCRIPTIVE_COMPARISON`, `ACCOUNTING_IDENTITY`, `COUNTERFACTUAL_SIMULATION`
+or `LIMITATION`. Descriptive associations and sequential counterfactuals are
+not causal estimates.
+
+### 44.2 Signal provenance and execution
+
+| Provenance | Available | FIXED accepted / rejected | PIT accepted / rejected | FIXED rejection reasons: full / duplicate / other | PIT rejection reasons: full / duplicate / other |
+|---|---:|---:|---:|---:|---:|
+| BOTH | 5,118 | 476 / 4,642 | 555 / 4,563 | 4,408 / 232 / 2 | 4,288 / 273 / 2 |
+| FIXED_ONLY | 778 | 128 / 650 | NOT_APPLICABLE | 556 / 94 / 0 | NOT_APPLICABLE |
+| PIT_ONLY | 277 | NOT_APPLICABLE | 47 / 230 | NOT_APPLICABLE | 205 / 25 / 0 |
+
+Acceptance rates were 9.3005% FIXED and 10.8441% PIT for BOTH, 16.4524% for
+FIXED_ONLY in FIXED_REBUILT, and 16.9675% for PIT_ONLY in PIT. No unavailable
+signal was counted as rejected. Accepted totals reconcile exactly to 604 and
+602. There were no insufficient-cash rejections.
+
+The 5,118 BOTH signals reconcile into 348 accepted in both, 128 accepted only
+in FIXED, 207 accepted only in PIT, and 4,435 rejected in both. Of the
+FIXED-only acceptances, PIT rejected 121 for full capacity and seven as already
+held. Of the PIT-only acceptances, FIXED rejected 196 for full capacity and 11
+as already held. Paired rejection-reason combinations for the 4,435 rejected
+in both are preserved in the deterministic diagnostic artifact.
+
+**BOTH_FOUR_WAY = PASS**
+
+### 44.3 First path divergence, capacity and cash
+
+The first signal-set difference was FIXED_ONLY security
+`4e0975e7-830f-5d58-b5d8-69d241f1cdfe` (`EQT`) on 2021-09-27. It was also
+the first accepted-trade difference: FIXED accepted it at NEXT_OPEN on
+2021-09-28 with score 57.1575 and candidate rank 1, while it was not eligible
+in PIT. Both portfolios had ten available slots, $100,000 cash and no holdings
+before that entry. Holdings, cash and equity first diverged on 2021-09-28.
+This is a direct eligibility difference; later differences reflect the
+resulting holdings, cash, ranking and slot paths.
+
+| Capacity/cash diagnostic | FIXED_REBUILT | PIT |
+|---|---:|---:|
+| Sessions with 10 positions | 644 | 658 |
+| Rejected: portfolio full | 4,964 | 4,493 |
+| Rejected: duplicate position | 326 | 298 |
+| Rejected: insufficient cash | 0 | 0 |
+| Cash-constrained accepted entries | 95 | 81 |
+| Aggregate nominal target | $2,090,646.83 | $1,338,437.16 |
+| Aggregate actual notional | $1,929,031.19 | $1,237,289.91 |
+| Aggregate shortfall | $161,615.64 | $101,147.25 |
+| Largest individual shortfall | $9,065.85 | $6,190.55 |
+
+The 121 and 196 cross-arm full-capacity conflicts above are directly observed
+displacements. They do not identify hypothetical replacement returns or an
+individual causal return contribution for any occupied slot. Cash-constrained
+entries were accepted positions sized below the 10% previous-close-equity
+target; they are distinct from rejected signals.
+
+### 44.4 Common-trade path effect and INTC/WDC
+
+There were 348 BOTH positions executed in both arms, including 341 closed in
+both. Of the 348, 341 had different notionals. Total absolute entry-notional
+difference was $1,881,600.25. Every common trade with identical execution and
+lifecycle treatment had identical percentage return; dollar P&L differed with
+quantity. This is a prior-equity/available-cash path effect, not an additive
+CAGR contribution.
+
+| Ticker | security_id | Signal | Entry / exit | Return | FIXED notional / P&L | PIT notional / P&L |
+|---|---|---|---|---:|---:|---:|
+| INTC | `0cf86a05-f6b2-5ad3-8d17-caf499d7c753` | 2026-04-08 | 2026-04-09 / 2026-05-06 | 93.3169% | $34,149.76 / $31,867.49 | $22,138.02 / $20,658.50 |
+| INTC | `0cf86a05-f6b2-5ad3-8d17-caf499d7c753` | 2025-09-25 | 2025-09-26 / 2025-10-23 | 8.8729% | $29,422.77 / $2,610.66 | $18,803.69 / $1,668.44 |
+| INTC | `0cf86a05-f6b2-5ad3-8d17-caf499d7c753` | 2023-12-26 | 2023-12-27 / 2024-01-25 | -2.2309% | $16,944.82 / -$378.03 | $13,399.77 / -$298.94 |
+| WDC | `d1e56104-3d99-518e-88ce-a9be6b90213f` | 2026-06-16 | 2026-06-17 / 2026-07-16 | -32.9465% | $45,554.42 / -$15,008.60 | $26,799.87 / -$8,829.63 |
+| WDC | `d1e56104-3d99-518e-88ce-a9be6b90213f` | 2026-03-17 | 2026-03-18 / 2026-04-15 | 17.7953% | $33,630.48 / $5,984.63 | $21,972.16 / $3,910.00 |
+| WDC | `d1e56104-3d99-518e-88ce-a9be6b90213f` | 2024-04-01 | 2024-04-02 / 2024-04-29 | 0.4174% | $20,000.55 / $83.49 | $14,741.24 / $61.54 |
+
+Both tickers were verified as BOTH for these exact `(security_id, signal_date)`
+pairs; provenance was not inferred from ticker strings.
+
+### 44.5 Realized, unrealized and provenance P&L
+
+| Accounting identity | FIXED_REBUILT | PIT |
+|---|---:|---:|
+| Initial capital | $100,000.00 | $100,000.00 |
+| Realized P&L | $316,859.26 | $134,905.23 |
+| Unrealized P&L from actual open positions | -$1,431.07 | $8,891.85 |
+| Final equity | $415,428.20 | $243,797.07 |
+| Cash | $5,519.68 | $27,893.09 |
+| Open-position market value | $409,908.52 | $215,903.98 |
+
+Both `initial capital + realized P&L + unrealized P&L = final equity` and
+`cash + open market value = final equity` passed, with maximum floating-point
+residual below $0.0000000001.
+
+| Arm / provenance | Realized P&L | Unrealized P&L | Total P&L |
+|---|---:|---:|---:|
+| FIXED — BOTH | $184,319.98 | -$1,127.49 | $183,192.49 |
+| FIXED — FIXED_ONLY | $132,539.29 | -$303.58 | $132,235.71 |
+| FIXED — PIT_ONLY | $0.00 (NOT_APPLICABLE) | $0.00 | $0.00 |
+| PIT — BOTH | $140,045.87 | $8,891.85 | $148,937.72 |
+| PIT — FIXED_ONLY | $0.00 (NOT_APPLICABLE) | $0.00 | $0.00 |
+| PIT — PIT_ONLY | -$5,140.64 | $0.00 | -$5,140.64 |
+
+PIT total P&L minus FIXED total P&L was -$171,631.124639. The provenance
+differences were -$34,254.770316 BOTH, -$132,235.709385 FIXED_ONLY and
+-$5,140.644938 PIT_ONLY, summing exactly to the cross-arm difference subject
+only to floating-point precision.
+
+**ACCOUNTING_IDENTITY — NOT CAUSAL ATTRIBUTION**
+
+**TOTAL_PNL_RECONCILIATION = PASS**
+
+### 44.6 Realized-P&L concentration and cross-arm matching
+
+| Metric (denominator shown) | FIXED_REBUILT | PIT |
+|---|---:|---:|
+| Total realized P&L | $316,859.26 | $134,905.23 |
+| Top 1 dollars / realized P&L / initial capital | $31,867.49 / 10.0573% / 31.8675% | $20,658.50 / 15.3133% / 20.6585% |
+| Top 5 dollars / realized P&L / initial capital | $102,740.74 / 32.4247% / 102.7407% | $57,209.55 / 42.4072% / 57.2095% |
+| Top 10 dollars / realized P&L / initial capital | $159,188.07 / 50.2394% / 159.1881% | $85,503.16 / 63.3802% / 85.5032% |
+| Bottom 10 dollars / realized P&L / initial capital | -$89,499.34 / -28.2458% / -89.4993% | -$49,315.53 / -36.5557% / -49.3155% |
+
+The complete top/bottom ledgers retain security ID, ticker, signal, entry,
+exit, provenance, percentage return and dollar P&L. The opposite-arm matching
+summary is:
+
+| Set | Executed in both | Rejected in other | Not eligible in other |
+|---|---:|---:|---:|
+| FIXED top 10 | 4 | 1 | 5 |
+| FIXED bottom 10 | 3 | 4 | 3 |
+| PIT top 10 | 6 | 4 | 0 |
+| PIT bottom 10 | 6 | 3 | 1 |
+
+Selected detailed rows demonstrate all classifications:
+
+| Arm/set | Ticker | security_id | Signal | Return / P&L | Opposite-arm classification | Opposite reason or P&L |
+|---|---|---|---|---:|---|---:|
+| FIXED top | INTC | `0cf86a05-f6b2-5ad3-8d17-caf499d7c753` | 2026-04-08 | 93.3169% / $31,867.49 | EXECUTED_IN_BOTH | $20,658.50 |
+| FIXED top | MRVL | `dfd69f29-0d22-50a9-8828-b0fb6fc1d1a0` | 2026-04-01 | 61.3564% / $20,649.08 | NOT_ELIGIBLE_IN_OTHER_ARM | — |
+| FIXED top | DELL | `ede6f722-986e-57e0-aa42-9c0838c1185d` | 2026-05-22 | 42.3322% / $16,741.06 | REJECTED_IN_OTHER_ARM | MAX_POSITIONS |
+| FIXED bottom | WDC | `d1e56104-3d99-518e-88ce-a9be6b90213f` | 2026-06-16 | -32.9465% / -$15,008.60 | EXECUTED_IN_BOTH | -$8,829.63 |
+| FIXED bottom | APP | `336370e3-298a-534d-a3f8-e33c8edb2fe5` | 2025-02-13 | -38.2133% / -$10,550.42 | NOT_ELIGIBLE_IN_OTHER_ARM | — |
+| FIXED bottom | SMCI | `5302a479-67b9-59c6-8dee-af2bf282faa4` | 2025-07-28 | -26.2917% / -$7,229.06 | REJECTED_IN_OTHER_ARM | MAX_POSITIONS |
+| PIT top | INTC | `0cf86a05-f6b2-5ad3-8d17-caf499d7c753` | 2026-04-08 | 93.3169% / $20,658.50 | EXECUTED_IN_BOTH | $31,867.49 |
+| PIT top | SNDK | `fe8bd6b1-8f1c-5659-8564-77eb3cb7711a` | 2026-01-07 | 59.5720% / $11,928.39 | REJECTED_IN_OTHER_ARM | MAX_POSITIONS |
+| PIT bottom | WDC | `d1e56104-3d99-518e-88ce-a9be6b90213f` | 2026-06-16 | -32.9465% / -$8,829.63 | EXECUTED_IN_BOTH | -$15,008.60 |
+| PIT bottom | MRO | `c9c4a4c1-7795-5466-b0c9-65b0bb0ff348` | 2022-05-31 | -28.5400% / -$3,816.14 | NOT_ELIGIBLE_IN_OTHER_ARM | — |
+| PIT bottom | AMD | `00de690b-ae35-5acf-900e-ad635f307634` | 2026-01-21 | -19.2982% / -$3,563.31 | REJECTED_IN_OTHER_ARM | MAX_POSITIONS |
+
+The deterministic local artifact
+`backend/data/phase3c_attribution/diagnostics.json` contains all 40 rows and
+their opposite-arm notionals, quantities, returns, P&L and exact rejection
+reasons. Concentration differences reflect both exclusive executions and
+different sizes; they are not independent causal components of the CAGR gap.
+
+### 44.7 Executed returns by provenance
+
+| Arm / provenance | Closed | Mean / median return | Positive rate | Realized P&L | Mean holding | Ordinary / lifecycle | Open |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| FIXED — BOTH | 467 | 1.9183% / 1.3626% | 57.6017% | $184,319.98 | 20.0000 | 467 / 0 | 9 |
+| FIXED — FIXED_ONLY | 127 | 5.2877% / 1.8656% | 54.3307% | $132,539.29 | 20.0000 | 127 / 0 | 1 |
+| PIT — BOTH | 546 | 1.7539% / 0.9618% | 55.8608% | $140,045.87 | 20.0000 | 546 / 0 | 9 |
+| PIT — PIT_ONLY | 47 | -0.2180% / -0.1157% | 48.9362% | -$5,140.64 | 19.2340 | 44 / 3 | 0 |
+
+Dollar P&L depends on sizing and portfolio path and is not a pure signal-quality
+measure.
+
+### 44.8 Locked sequential counterfactual
+
+| Metric | STEP 0 FIXED_REBUILT | STEP 1 BOTH_ONLY | STEP 2 PIT |
+|---|---:|---:|---:|
+| Initial / final equity | $100,000.00 / $415,428.20 | $100,000.00 / $289,741.26 | $100,000.00 / $243,797.07 |
+| Total return | 315.4282% | 189.7413% | 143.7971% |
+| CAGR | 33.0625% | 23.7851% | 19.5718% |
+| Annualized volatility | 21.5198% | 17.7644% | 18.3534% |
+| Maximum drawdown | -24.7385% | -18.1885% | -21.0174% |
+| Sharpe / Sortino / Calmar | 1.4415 / 2.1597 / 1.3365 | 1.2956 / 1.9447 / 1.3077 | 1.0702 / 1.5930 / 0.9312 |
+| Accepted / closed / open | 604 / 594 / 10 | 591 / 581 / 10 | 602 / 593 / 9 |
+| Average exposure | 89.8256% | 87.8421% | 89.3999% |
+| Total slippage | $12,517.20 | $9,844.68 | $9,377.61 |
+
+STEP 1 CAGR minus STEP 0 CAGR was -9.277417 percentage points/year; STEP 2
+minus STEP 1 was -4.213301 percentage points/year. STEP 1 was run twice and
+both executions produced digest
+`dc500c2a5bcfdb2dcfedc1914d00bd79105f195291964aae47ffb199b9bb8bd0`.
+STEP 0 and STEP 2 retained their frozen digests. No STEP 3 was run.
+
+**These are sequential, order-dependent counterfactual differences, not
+independent causal effects. They are not a Shapley decomposition.**
+
+**STEP1_DETERMINISM = PASS**
+
+### 44.9 Equity path
+
+Equity first diverged on 2021-09-28 (PIT minus FIXED +$88.03). The largest
+absolute dollar gap was -$199,944.13 on 2026-06-22. The largest relative PIT
+to FIXED ratio divergence was -43.6950% on 2026-09-16. The final dollar gap
+was -$171,631.12.
+
+| Arm / year | Start / end equity | Return | Maximum drawdown | Average exposure | Period |
+|---|---:|---:|---:|---:|---|
+| FIXED 2021 | $100,000 / $120,658 | 20.6577% | -5.3570% | 86.0848% | partial |
+| FIXED 2022 | $120,658 / $116,398 | -3.5304% | -21.3119% | 85.8289% | full |
+| FIXED 2023 | $116,398 / $170,760 | 46.7039% | -21.5498% | 91.3904% | full |
+| FIXED 2024 | $170,760 / $257,186 | 50.6122% | -7.7442% | 93.4576% | full |
+| FIXED 2025 | $257,186 / $303,516 | 18.0143% | -24.7385% | 89.1926% | full |
+| FIXED 2026 | $303,516 / $415,428 | 36.8719% | -15.4497% | 90.4295% | partial |
+| PIT 2021 | $100,000 / $122,149 | 22.1489% | -5.9233% | 84.9946% | partial |
+| PIT 2022 | $122,149 / $122,504 | 0.2906% | -20.2496% | 84.0736% | full |
+| PIT 2023 | $122,504 / $134,710 | 9.9639% | -16.4874% | 90.8400% | full |
+| PIT 2024 | $134,710 / $171,076 | 26.9956% | -6.5506% | 92.3361% | full |
+| PIT 2025 | $171,076 / $196,353 | 14.7756% | -16.2577% | 90.7026% | full |
+| PIT 2026 | $196,353 / $243,797 | 24.1625% | -16.8068% | 90.5645% | partial |
+
+The monthly appendix in the deterministic diagnostic artifact contains, for
+each arm and month, starting/ending equity, return, within-month maximum
+drawdown, average exposure and session count. Calendar periods are descriptive,
+not independent out-of-sample tests.
+
+### 44.10 Score buckets and existing market regimes
+
+| Arm / score | Accepted / closed / open | Mean / median return | Positive rate | Realized P&L |
+|---|---:|---:|---:|---:|
+| FIXED 0–20 | 21 / 21 / 0 | 2.2033% / 1.3736% | 57.1429% | $14,217.74 |
+| FIXED 20–40 | 207 / 204 / 3 | 1.6889% / 0.8330% | 55.8824% | $49,401.38 |
+| FIXED 40–60 | 184 / 181 / 3 | 1.1762% / 0.4174% | 53.0387% | $36,429.00 |
+| FIXED 60–80 | 120 / 117 / 3 | 4.6512% / 1.5183% | 58.1197% | $128,828.49 |
+| FIXED 80–100 | 72 / 71 / 1 | 5.9083% / 3.9624% | 67.6056% | $87,982.65 |
+| PIT 0–20 | 22 / 22 / 0 | 2.4624% / 1.1750% | 54.5455% | $10,152.90 |
+| PIT 20–40 | 242 / 237 / 5 | 1.1351% / 0.4347% | 52.7426% | $25,162.43 |
+| PIT 40–60 | 195 / 194 / 1 | 1.6292% / 1.0441% | 57.7320% | $42,602.24 |
+| PIT 60–80 | 87 / 85 / 2 | 2.0510% / 1.0905% | 51.7647% | $31,588.24 |
+| PIT 80–100 | 56 / 55 / 1 | 2.4320% / 1.7643% | 63.6364% | $25,399.41 |
+
+Boundary behavior remained 20→20–40, 40→40–60, 60→60–80 and 80→80–100;
+100 is included in the final bucket. Score is not a calibrated probability.
+
+Regimes reused the approved definitions exactly: SPY close versus trailing
+SMA50/SMA200 and 20-session annualized sample volatility with expanding tercile
+thresholds based on at least 60 prior volatility observations only. The
+classification uses information through each session close. Entry/trade rows
+use signal-date regime; holding summaries compound portfolio daily returns on
+sessions bearing that label, a descriptive non-contiguous aggregation.
+
+| Arm / holding-session regime | Sessions | Compounded return | Average exposure | Accepted / closed | Mean closed-trade return |
+|---|---:|---:|---:|---:|---:|
+| FIXED above SMA200 | 855 | 297.6443% | 92.3043% | 420 / 410 | 2.8566% |
+| FIXED below SMA200 | 198 | -12.9430% | 84.4004% | 90 / 90 | 2.1229% |
+| FIXED above SMA50 | 773 | 511.5417% | 92.1232% | 388 / 381 | 3.0228% |
+| FIXED below SMA50 | 280 | -43.3927% | 87.2149% | 122 / 119 | 1.7696% |
+| FIXED VOL_LOW / MID / HIGH | 566 / 333 / 154 | 91.7492% / 58.6677% / 13.7827% | 92.3886% / 90.6534% / 85.4019% | 279/269; 159/159; 72/72 | 3.1891% / 1.3268% / 4.0753% |
+| PIT above SMA200 | 855 | 120.5320% | 91.7902% | 422 / 413 | 1.4480% |
+| PIT below SMA200 | 198 | -10.6812% | 83.3745% | 84 / 84 | 1.3213% |
+| PIT above SMA50 | 773 | 235.3143% | 91.7592% | 389 / 383 | 1.5193% |
+| PIT below SMA50 | 280 | -41.2562% | 85.9247% | 117 / 114 | 1.1149% |
+| PIT VOL_LOW / MID / HIGH | 566 / 333 / 154 | 40.4388% / 27.1766% / 10.2859% | 91.6893% / 89.4342% / 86.4356% | 271/262; 163/163; 72/72 | 1.8287% / -0.2494% / 3.7576% |
+
+The 199 warm-up-unavailable holding sessions are retained in the artifact,
+with 94 FIXED and 96 PIT accepted signal-date rows, not silently assigned to a
+regime. No thresholds were recalibrated.
+
+### 44.11 Lifecycle, rejections and SPY context
+
+FIXED_REBUILT had no executed lifecycle-affected position. PIT retained all
+three approved cases:
+
+| Ticker | security_id | Signal / entry | Scheduled / actual exit | Type | Last close | Return / P&L |
+|---|---|---|---|---|---:|---:|
+| TWTR | `ae13e1b5-7a16-59c1-95ce-2bfa52b340d7` | 2022-09-30 / 2022-10-03 | 2022-10-28 / 2022-10-27 | ACQUISITION | $53.70 | 22.2012% / $2,487.91 |
+| CTLT | `39335ae6-6153-5436-a1b0-e8089c0adaf8` | 2024-12-16 / 2024-12-17 | 2025-01-16 / 2024-12-18 | ACQUISITION | $63.48 | -0.1157% / -$20.50 |
+| ANSS | `3e7d73ad-80f0-5815-b607-ec62690c8a86` | 2025-07-14 / 2025-07-15 | 2025-08-11 / 2025-07-17 | ACQUISITION | $374.30 | -3.2583% / -$600.72 |
+
+All used `ACQUISITION_LAST_LEGITIMATE_CLOSE`. Coverage remains
+`KNOWN_LIFECYCLE_LOWER_BOUND`; complete corporate-event coverage is not
+claimed.
+
+Rejections reconcile exactly to the approved totals (FIXED 4,964 full, 326
+duplicate, zero cash, two other; PIT 4,493 full, 298 duplicate, zero cash, two
+other). By calendar year, full/duplicate counts were FIXED: 2021 295/21, 2022
+419/51, 2023 1,023/77, 2024 1,569/77, 2025 961/40, 2026 697/60; PIT: 275/23,
+386/54, 898/55, 1,391/65, 876/42 and 667/59. The two `REJECTED_OTHER` rows in
+each arm are MPWR and MTD signals on 2026-09-22 whose legitimate NEXT_OPEN is
+outside the research window; they are not lifecycle failures. Provenance and
+score-bucket rejection tables are retained in the artifact.
+
+SPY context remains split-adjusted price-only, dividends excluded: 74.6528%
+total return, 11.8342% CAGR and -25.3606% maximum drawdown. Portfolio-minus-SPY
+CAGR is not presented as proven alpha.
+
+### 44.12 Interpretation, determinism and completion gate
+
+The observed gap begins with different eligible signal sets, which create
+different holdings, cash, available slots and later acceptance decisions.
+The dollar P&L identity shows that both exclusive eligibility and different
+sizing of common trades are material descriptions. Concentration is higher in
+the PIT realized ledger, and the sequential BOTH_ONLY path falls between the
+two approved arms. None of these facts supplies an order-invariant or causal
+decomposition of CAGR.
+
+The complete diagnostic analysis was evaluated twice. Signal provenance,
+BOTH four-way classification, capacity, cash constraints, first divergence,
+common-trade comparisons, P&L identities, concentration, cross-arm matching,
+sequential counterfactual, equity summaries, score buckets, regimes and
+lifecycle ledgers agreed exactly. Final Phase 3C diagnostic digest:
+`a583b6632d04985ba174dcf4a5b7c27673d3c7c823f794214a5ada8267cbdeb9`.
+
+**PHASE3C_DETERMINISM = PASS**
+
+No strategy, signal, score, threshold, universe, sizing, ordering, entry/exit,
+holding, slippage, lifecycle, benchmark or accounting methodology changed.
+No optimization, alternative start date, randomization, Monte Carlo,
+bootstrap or extra robustness experiment was run.
+
+Limitations remain: this is one historical, compounded and slot-constrained
+path; calendar and regime associations are descriptive; lifecycle coverage is
+a known lower bound; SPY excludes dividends; realized P&L is concentrated;
+open positions are marked but not liquidated at the research-window end; and
+historical performance is neither a forecast nor proof of alpha.
+
+**PHASE_3_COMPLETE**
