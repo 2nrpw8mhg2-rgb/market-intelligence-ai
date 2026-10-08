@@ -1429,3 +1429,335 @@ introduced.
 
 This status is a structural readiness conclusion only. Phase 3B was not
 started, and no commit, tag or push was created.
+
+## 43. PHASE 3B — PRIMARY PIT PORTFOLIO COMPARISON
+
+### 43.1 Checkpoint preflight and methodology lock
+
+Phase 3B started from commit `fa7dc4b81dae2f0502ad659c9bb28314f8989b63`,
+tag `v0.9.1-pit-portfolio-engine`, on clean and synchronized `main`. Alembic
+head remained `20261001_0010`; the complete pre-execution suite passed with
+255 tests and zero failures.
+
+| Approved invariant | Reproduced value | Status |
+|---|---:|---|
+| Canonical PIT hash | `74d14b5198a7e64e91127abbbdcaae087e8c9134f6e8f6786446c210e2529b4d` | PASS |
+| Phase 2 analytical digest | `ed33baca754eb93a6cbe6c898037e9eb8c5734f2762aeb3d8f3d821fdf5cf814` | PASS |
+| Phase 2 artefact SHA-256 | `e86c01a3f90573b628d4b9f5096515df80eeeab09684d98f00056d6512084bfc` | PASS |
+| FIXED_REBUILT signals | 5,896 | PASS |
+| PIT total / executable / non-executable | 5,398 / 5,395 / 3 | PASS |
+| BOTH / FIXED_ONLY / PIT_ONLY | 5,118 / 778 / 277 | PASS |
+
+`PIT_DATA_INTEGRITY`, `BOTH_INVARIANCE`, `PIT_EVENT_DETERMINISM`,
+`ARITHMETIC_BRIDGE`, and `DATE_CLUSTERED_BOOTSTRAP` all remained `PASS`.
+The exact reconciliations remained 5,118 + 778 = 5,896; 5,118 + 277 =
+5,395; and 5,395 + 3 = 5,398.
+
+The frozen methodology was unchanged: $100,000 initial capital; 10 positions;
+10% of previous-session closing equity capped by cash; no leverage; ordering by
+`(-score, security_id)`; entry at signal + 1 XNYS OPEN; ordinary exit at signal
++ 20 XNYS CLOSE; 5 bp adverse slippage on each applicable side; close proceeds
+and slots available next XNYS session; no exit merely because of index removal;
+the approved lifecycle fallback; and no forced liquidation at 2026-09-22.
+
+### 43.2 Portfolio results
+
+| Metric | FIXED_REBUILT | PIT |
+|---|---:|---:|
+| Initial capital | $100,000.00 | $100,000.00 |
+| Final equity | $415,428.20 | $243,797.07 |
+| Cash at research end | $5,519.68 | $27,893.09 |
+| Open-position market value | $409,908.52 | $215,903.98 |
+| Total return | 315.4282% | 143.7971% |
+| CAGR | 33.0625% | 19.5718% |
+| Annualized volatility | 21.5198% | 18.3534% |
+| Maximum drawdown | -24.7385% | -21.0174% |
+| Sharpe, risk-free rate 0 | 1.441494 | 1.070165 |
+| Sortino, MAR 0 | 2.159655 | 1.593005 |
+| Calmar | 1.336482 | 0.931219 |
+| Closed trades | 594 | 593 |
+| Open positions at research end | 10 | 9 |
+| Positive closed-trade rate | 56.9024% | 55.3120% |
+| Mean closed-trade return | 2.6387% | 1.5976% |
+| Median closed-trade return | 1.3874% | 0.8718% |
+| Average concurrent positions | 9.071885 | 9.014377 |
+| Median concurrent positions | 10 | 10 |
+| Maximum concurrent positions | 10 | 10 |
+| Portfolio exposure | 89.8256% | 89.3999% |
+| Average cash percentage | 10.1744% | 10.6001% |
+| Entry slippage | $6,279.09 | $4,704.49 |
+| Exit slippage | $6,238.11 | $4,673.12 |
+| Total slippage | $12,517.20 | $9,377.61 |
+
+The final equity reconciliation is exact in both arms:
+
+- FIXED_REBUILT: $5,519.68 + $409,908.52 = $415,428.20.
+- PIT: $27,893.09 + $215,903.98 = $243,797.07.
+
+Closed-trade return statistics use only closed trades. Unrealized returns and
+P&L from the 19 positions remaining open are not included in those statistics.
+
+### 43.3 Pre-registered primary result
+
+The pre-registered primary metric is PIT CAGR minus FIXED_REBUILT CAGR:
+
+| Arm/difference | CAGR |
+|---|---:|
+| FIXED_REBUILT | 33.062544% |
+| PIT | 19.571826% |
+| **PIT minus FIXED_REBUILT** | **-13.490718 percentage points/year** |
+
+The corresponding total returns are 315.428197% and 143.797072%. The CAGR
+difference remains the primary result.
+
+### 43.4 Secondary PIT-minus-FIXED_REBUILT differences
+
+| Secondary metric | Difference |
+|---|---:|
+| Total return | -171.631125 percentage points |
+| Annualized volatility | -3.166402 percentage points |
+| Maximum drawdown | +3.721048 percentage points |
+| Sharpe | -0.371329 |
+| Sortino | -0.566650 |
+| Calmar | -0.405264 |
+| Closed trades | -1 |
+| Positive closed-trade rate | -1.590384 percentage points |
+| Mean closed-trade return | -1.041113 percentage points |
+| Median closed-trade return | -0.515655 percentage points |
+| Average concurrent positions | -0.057508 |
+| Exposure | -0.425718 percentage points |
+| Average cash percentage | +0.425718 percentage points |
+| Total slippage | -$3,139.58 |
+
+These differences are descriptive only. Phase 3B performs no attribution or
+causal interpretation.
+
+### 43.5 Signal outcomes
+
+| Outcome | FIXED_REBUILT | PIT |
+|---|---:|---:|
+| Executable signals considered | 5,896 | 5,395 |
+| ACCEPTED | 604 | 602 |
+| REJECTED_PORTFOLIO_FULL | 4,964 | 4,493 |
+| REJECTED_INSUFFICIENT_CASH | 0 | 0 |
+| REJECTED_DUPLICATE_POSITION | 326 | 298 |
+| REJECTED_OTHER | 2 | 2 |
+| Reconciled total | 5,896 | 5,395 |
+
+All four `REJECTED_OTHER` rows are
+`SIGNAL_SKIPPED_ENTRY_OUTSIDE_RESEARCH_WINDOW`: their legitimate NEXT_OPEN is
+after 2026-09-22, so no entry is fabricated. This explicit classification
+closed a ledger-only Phase 3B gap; it did not add, remove, resize, reprioritize,
+or otherwise change any trade.
+
+The three PIT lifecycle signals without a legitimate NEXT_OPEN were retained
+separately and never entered:
+
+| Ticker | Security ID | Signal date | Entered |
+|---|---|---|---|
+| TWTR | `ae13e1b5-7a16-59c1-95ce-2bfa52b340d7` | 2022-10-27 | No |
+| DAY | `51f5567e-647b-5136-a9d1-9bd0ddc9d01b` | 2026-02-03 | No |
+| HOLX | `75f40d18-407a-5f0e-8ec7-fb9801bf09fa` | 2026-04-06 | No |
+
+**NON_EXECUTABLE_SIGNALS_SKIPPED = 3**
+
+### 43.6 Open positions at the research-window end
+
+No position was force-liquidated. All marks are legitimate same-security closes
+on 2026-09-22.
+
+#### FIXED_REBUILT — 10 open positions
+
+| Ticker | Security ID | Entry | Entry price | Quantity | Entry notional | Mark | Unrealized return | Unrealized P&L | Scheduled exit |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| RVTY | `01865053-7dca-5816-9221-1ca94f2033f6` | 2026-09-16 | $140.9504 | 290.7040 | $40,974.86 | $143.31 | 1.6740% | $685.93 | 2026-10-13 |
+| ILMN | `1262fcc5-523e-515d-bbf2-2232b69bf4ac` | 2026-09-18 | $249.2546 | 169.1644 | $42,164.99 | $247.46 | -0.7200% | -$303.58 | 2026-10-15 |
+| TMO | `27bc2dd1-2c8e-5b08-8ea6-f9f2a191ca58` | 2026-09-17 | $657.0784 | 62.0848 | $40,794.57 | $658.52 | 0.2194% | $89.50 | 2026-10-14 |
+| MPC | `5624f6d4-96e8-595d-bcc6-108c558dc7c9` | 2026-09-21 | $419.2195 | 99.5318 | $41,725.67 | $389.68 | -7.0463% | -$2,940.12 | 2026-10-16 |
+| HOOD | `75e5ba01-7726-5dac-b7e8-96cb55d39ad8` | 2026-09-04 | $120.5352 | 338.5386 | $40,805.83 | $124.25 | 3.0819% | $1,257.59 | 2026-10-02 |
+| CRWD | `9c627f5b-02ec-5d8b-b2cc-d80d64a4c5a6` | 2026-09-15 | $233.1165 | 173.6810 | $40,487.91 | $250.06 | 7.2683% | $2,942.76 | 2026-10-12 |
+| HPQ | `c5a4a42e-3f99-5c3d-b300-0ede724e669c` | 2026-09-14 | $35.1376 | 1,176.7468 | $41,348.01 | $32.04 | -8.8155% | -$3,645.04 | 2026-10-09 |
+| SJM | `cb11e788-3aa9-5d8b-89ab-23d8e10be9b1` | 2026-08-27 | $130.3551 | 320.6185 | $41,794.28 | $121.11 | -7.0923% | -$2,964.16 | 2026-09-24 |
+| SWKS | `dd2b435e-34c8-50da-acaa-796038567e30` | 2026-09-11 | $84.3121 | 473.1875 | $39,895.45 | $89.96 | 6.6988% | $2,672.50 | 2026-10-08 |
+| DELL | `ede6f722-986e-57e0-aa42-9c0838c1185d` | 2026-09-14 | $538.8393 | 76.7353 | $41,348.01 | $548.92 | 1.8708% | $773.55 | 2026-10-09 |
+
+#### PIT — 9 open positions
+
+| Ticker | Security ID | Entry | Entry price | Quantity | Entry notional | Mark | Unrealized return | Unrealized P&L | Scheduled exit |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| AMD | `00de690b-ae35-5acf-900e-ad635f307634` | 2026-09-18 | $547.6437 | 43.3828 | $23,758.34 | $623.77 | 13.9007% | $3,302.58 | 2026-10-15 |
+| RVTY | `01865053-7dca-5816-9221-1ca94f2033f6` | 2026-09-16 | $140.9504 | 164.8971 | $23,242.32 | $143.31 | 1.6740% | $389.08 | 2026-10-13 |
+| INTC | `0cf86a05-f6b2-5ad3-8d17-caf499d7c753` | 2026-09-18 | $109.8549 | 216.2702 | $23,758.34 | $123.86 | 12.7487% | $3,028.89 | 2026-10-15 |
+| TMO | `27bc2dd1-2c8e-5b08-8ea6-f9f2a191ca58` | 2026-09-17 | $657.0784 | 34.9569 | $22,969.40 | $658.52 | 0.2194% | $50.39 | 2026-10-14 |
+| HOOD | `75e5ba01-7726-5dac-b7e8-96cb55d39ad8` | 2026-09-04 | $120.5352 | 191.6562 | $23,101.33 | $124.25 | 3.0819% | $711.96 | 2026-10-02 |
+| CRWD | `9c627f5b-02ec-5d8b-b2cc-d80d64a4c5a6` | 2026-09-15 | $233.1165 | 98.2804 | $22,910.79 | $250.06 | 7.2683% | $1,665.21 | 2026-10-12 |
+| HPQ | `c5a4a42e-3f99-5c3d-b300-0ede724e669c` | 2026-09-14 | $35.1376 | 666.3108 | $23,412.53 | $32.04 | -8.8155% | -$2,063.94 | 2026-10-09 |
+| SWKS | `dd2b435e-34c8-50da-acaa-796038567e30` | 2026-09-11 | $84.3121 | 242.5101 | $20,446.54 | $89.96 | 6.6988% | $1,369.66 | 2026-10-08 |
+| DELL | `ede6f722-986e-57e0-aa42-9c0838c1185d` | 2026-09-14 | $538.8393 | 43.4499 | $23,412.53 | $548.92 | 1.8708% | $438.01 | 2026-10-09 |
+
+### 43.7 Lifecycle positions
+
+FIXED_REBUILT had no lifecycle exits. PIT had three; none disappeared
+silently and all used the approved last-legitimate-close fallback with 5 bp
+adverse exit slippage.
+
+| Ticker | Security ID | Entry | Scheduled exit | Lifecycle / actual exit | Category | Last legitimate close | Exit value | Exit slippage | Return | Realized P&L | Slot release |
+|---|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|
+| TWTR | `ae13e1b5-7a16-59c1-95ce-2bfa52b340d7` | 2022-10-03 | 2022-10-28 | 2022-10-27 | ACQUISITION | $53.70 | $13,694.13 | $6.85 | 22.2012% | $2,487.91 | 2022-10-28 |
+| CTLT | `39335ae6-6153-5436-a1b0-e8089c0adaf8` | 2024-12-17 | 2025-01-16 | 2024-12-18 | ACQUISITION | $63.48 | $17,697.85 | $8.85 | -0.1157% | -$20.50 | 2024-12-19 |
+| ANSS | `3e7d73ad-80f0-5815-b607-ec62690c8a86` | 2025-07-15 | 2025-08-11 | 2025-07-17 | ACQUISITION | $374.30 | $17,835.78 | $8.92 | -3.2583% | -$600.72 | 2025-07-18 |
+
+There were no portfolio positions affected by MERGER, DELISTING_OTHER, or
+BANKRUPTCY in these two realized paths. The configured rules remained active.
+
+### 43.8 Accounting and slippage reconciliation
+
+| Audit | FIXED_REBUILT | PIT |
+|---|---:|---:|
+| Maximum equity reconciliation error | $0.000000000058 | $0.000000000029 |
+| Minimum cash | $0.00 | $0.00 |
+| Maximum concurrent positions | 10 | 10 |
+| Position-limit violations | 0 | 0 |
+| Negative-cash violations | 0 | 0 |
+| Silent-position losses | 0 | 0 |
+| Entries | 604 | 602 |
+| Ordinary exits | 594 | 590 |
+| Lifecycle exits | 0 | 3 |
+| Slippage reconciliation maximum error | $0.00000000000003 | $0.00000000000091 |
+
+**ACCOUNTING_RECONCILIATION = PASS**
+
+**SLIPPAGE_RECONCILIATION = PASS**
+
+Total slippage includes the entry slippage already incurred by open positions:
+$205.57 for FIXED_REBUILT and $103.45 for PIT. Closed-trade slippage alone was
+$12,311.63 and $9,274.16, respectively.
+
+### 43.9 Exposure
+
+| Exposure measure | FIXED_REBUILT | PIT |
+|---|---:|---:|
+| Average positions | 9.071885 | 9.014377 |
+| Median positions | 10 | 10 |
+| Maximum positions | 10 | 10 |
+| Sessions with 0 positions | 1 | 1 |
+| Sessions with 1–4 positions | 17 | 28 |
+| Sessions with 5–9 positions | 590 | 565 |
+| Sessions with 10 positions | 644 | 658 |
+| Sessions at full capacity | 644 | 658 |
+| Percentage at full capacity | 51.4377% | 52.5559% |
+| Average cash percentage | 10.1744% | 10.6001% |
+| Portfolio exposure | 89.8256% | 89.3999% |
+
+### 43.10 Realized P&L concentration
+
+Only closed trades are used.
+
+| Measure | FIXED_REBUILT | PIT |
+|---|---:|---:|
+| Total realized trade P&L | $316,859.26 | $134,905.23 |
+| Best 10 trades P&L | $159,188.07 | $85,503.16 |
+| Best 10 as percentage of total | 50.2394% | 63.3802% |
+| Worst 10 trades P&L | -$89,499.34 | -$49,315.53 |
+| Worst 10 as percentage of total | -28.2458% | -36.5557% |
+
+The best trade in both arms was INTC, security
+`0cf86a05-f6b2-5ad3-8d17-caf499d7c753`, entered 2026-04-09 and exited
+2026-05-06, returning 93.3169%. Realized P&L was $31,867.49 in
+FIXED_REBUILT and $20,658.50 in PIT because path-dependent position sizing
+differs.
+
+The worst trade in both arms was WDC, security
+`d1e56104-3d99-518e-88ce-a9be6b90213f`, entered 2026-06-17 and exited
+2026-07-16, returning -32.9465%. Realized P&L was -$15,008.60 in
+FIXED_REBUILT and -$8,829.63 in PIT.
+
+No outlier was removed or winsorized, and neither arm was rerun without these
+trades.
+
+### 43.11 SPY benchmark
+
+The existing approved SPY method produced a total return of 74.6528%, CAGR of
+11.8342%, and maximum drawdown of -25.3606%. SPY is split-adjusted price only;
+dividends are excluded. No benchmark-methodology change was made.
+
+### 43.12 Portfolio determinism and directional context
+
+Each complete arm was run twice. Accepted and rejected signals, rejection
+reasons, entries, sizes, exits, lifecycle treatments, returns, P&L, open
+positions, daily equity, cash, exposure, final equity, performance metrics,
+and slippage agreed exactly.
+
+| Arm | First and second deterministic digest |
+|---|---|
+| FIXED_REBUILT | `10218057ef650912625afd612ce52047241971df59dc233d3051ceb7d6fd4bc2` |
+| PIT | `5c6a0e5edf2d51f56ba2f456f978aadd8dcf550061a15cb970da90fbc2026792` |
+
+**PORTFOLIO_DETERMINISM = PASS**
+
+Phase 2 reported PIT minus FIXED_REBUILT 20-session mean excess return of
+-60.2630 bp. Phase 3B reports a CAGR difference of -13.490718 percentage
+points/year. The signs have the **SAME DIRECTION**. This is descriptive only
+and does not establish causality.
+
+### 43.13 Limitations and completion gate
+
+These are historical results, not future expected returns and not proof of
+alpha. They represent one deterministic, path-dependent portfolio trajectory.
+No alternative start date, path-robustness experiment, randomized path,
+random-entry control, generic-trend control, parameter optimization, CAGR
+bootstrap, or Phase 3C attribution was run. SPY excludes dividends. Sharpe uses
+a zero risk-free rate and Sortino uses MAR 0. The realized P&L is concentrated,
+especially in the PIT arm, and open positions retain unrealized P&L at the
+research-window end.
+
+All Phase 3B completion gates passed: checkpoint and signal counts unchanged;
+both simulations valid; accounting, slippage, open-position and deterministic
+reconciliations passed; three non-executable PIT signals excluded; all
+lifecycle positions accounted for; and zero blocking data issues.
+
+**READY_FOR_PHASE_3C**
+
+No Phase 3C attribution was started. No strategy, score, holding period,
+position limit, slippage, ordering, lifecycle rule, or research-window-end rule
+was changed. No optimization, alternative start-date test, randomized path, or
+CAGR bootstrap was run. No commit, tag, or push was created.
+
+### 43.14 Final independent checkpoint audit
+
+The final checkpoint audit compared the current engine with the frozen Phase
+3A implementation loaded directly from detached commit
+`fa7dc4b81dae2f0502ad659c9bb28314f8989b63`. Using the identical approved
+FIXED_REBUILT signals and input data, ordered candidates, accepted entries,
+economic rejection reasons, entry dates/prices/sizes, security identities,
+exit dates/prices, lifecycle treatments, trade returns, realized P&L, daily
+cash, daily market value, daily equity and final equity were exactly equal.
+Both engines ended at `$415,428.1969343563`.
+
+The only engine diff records a signal whose legitimate NEXT_OPEN is outside
+the research window as `SIGNAL_SKIPPED_ENTRY_OUTSIDE_RESEARCH_WINDOW`. Phase
+3A silently left those two signals outside its session loop. Excluding these
+two new diagnostic-only ledger rows, the canonical economic digest is
+`a5864380cff0e14cef2657521156b47922261600e960bad9529af59f991ada45`.
+
+**BASELINE_ENGINE_EQUIVALENCE = PASS**
+
+The TWTR lifecycle audit identified two distinct signals for security
+`ae13e1b5-7a16-59c1-95ce-2bfa52b340d7`:
+
+- signal 2022-09-30 had legitimate NEXT_OPEN on 2022-10-03, scheduled exit
+  2022-10-28, and acquisition exit on 2022-10-27;
+- signal 2022-10-27 had no legitimate NEXT_OPEN, was classified
+  `NON_EXECUTABLE_LIFECYCLE_TERMINATION`, and never entered.
+
+The executed position used the same-security final regular close of `$53.70`,
+then applied 5 bp adverse exit slippage exactly once to `$53.67315`. It did not
+substitute the `$54.20` acquisition consideration and used no successor or
+synthetic price.
+
+**TWTR_LIFECYCLE_AUDIT = PASS**
+
+Closed-trade-ledger concentration was independently reconciled. Top-10 and
+bottom-10 sets have zero overlap in each portfolio. Accounting, slippage and
+portfolio determinism remain `PASS`; all approved Phase 3B financial values
+and both deterministic digests reproduced exactly at documented precision.

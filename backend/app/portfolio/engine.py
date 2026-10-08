@@ -237,10 +237,18 @@ class PortfolioEngine:
         lifecycle_by_security = {item.security_id: item for item in lifecycle_events or []}
         if len(lifecycle_by_security) != len(lifecycle_events or []):
             raise ValueError("duplicate lifecycle policy for security_id")
+        session_set = set(sessions)
         for event in source.events:
             security_id = portfolio_security_id(event, required=request.security_id_native)
-            if event.entry_date and event.entry_model.value == "NEXT_OPEN":
+            if (event.entry_date and event.entry_model.value == "NEXT_OPEN"
+                    and event.entry_date in session_set):
                 entries[event.entry_date].append((event, security_id))
+            elif event.entry_date and event.entry_model.value == "NEXT_OPEN":
+                skipped.append(self._skip(
+                    event, "SIGNAL_SKIPPED_ENTRY_OUTSIDE_RESEARCH_WINDOW", security_id,
+                    ticker_by_security_id.get(security_id, str(event.ticker)),
+                    provenance_by_event.get((security_id, event.signal_date)),
+                ))
             elif event.entry_model.value == "NEXT_OPEN":
                 skipped.append(self._skip(
                     event, "NON_EXECUTABLE_LIFECYCLE_TERMINATION", security_id,
