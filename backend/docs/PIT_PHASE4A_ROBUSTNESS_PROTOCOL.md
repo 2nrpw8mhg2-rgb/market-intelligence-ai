@@ -188,10 +188,17 @@ securities is an economic consequence of the randomized path.
 The report must show:
 
 - total frozen scheduled tickets: **602**;
-- scarcity-unfilled tickets for every seed and
-  `scarcity_rate_s = scarcity_unfilled_tickets_s / 602`;
-- mean, median, 95th percentile, maximum, and proportion nonzero across all
-  1,000 attempted seeds;
+- all 1,000 attempted seeds in the attempted-seed audit registry, each with an
+  explicit validity status and, where applicable, a failure reason;
+- scarcity-unfilled tickets and
+  `scarcity_rate_s = scarcity_unfilled_tickets_s / 602` for every
+  invariant-valid control;
+- mean, median, 95th percentile, maximum, and proportion nonzero calculated
+  only across the `M` invariant-valid controls;
+- invalid attempts reported separately rather than treated as zero-scarcity
+  observations; if an invalid attempt has an available scarcity count, retain
+  it only in the technical audit record and exclude it from primary scarcity
+  statistics;
 - scarcity by execution session and calendar period;
 - separate counts for scarcity, cash, capacity, missing execution price, and
   every other engine reason; and
@@ -285,6 +292,10 @@ manifest and its own digest is recorded downstream; it does not alter the base
 manifest hash. A clean implementation must reproduce the base hash, every seed,
 selection, and output digest byte-for-byte. Every attempt produces an immutable
 audit row. There are no performance-based retries or replacement seeds.
+The attempted-seed registry retains all 1,000 attempts with explicit validity
+status and failure reason. Primary control and scarcity distributions use only
+the invariant-valid subset; invalid attempts are never silently converted into
+zero-valued observations.
 
 A seed is `PRIMARY_VALID` only if all required inputs and the exact schedule are
 available, PIT/identity rules pass, the engine and accounting invariants pass,
@@ -739,12 +750,15 @@ execution simulation, and outcome evaluation remain separate authorizations.
 
 The first holdout session is the **first XNYS session that actually satisfies all
 prerequisites**, not a backdated or arbitrary calendar date. Before activation,
-the approval record must freeze that rule, authorized operators/reviewers, a
-minimum of 1,250 valid registered XNYS sessions, and a 20-XNYS-session maturation
-buffer after the last included signal. The unseal date is the later of the
-1,250th valid registration and completion of that buffer. Because activation has
-not occurred, an exact calendar unseal date does not yet exist and must not be
-invented. No outcome-conditioned metric may be viewed before unsealing.
+the approval record must freeze that rule and the authorized
+operators/reviewers. The holdout may be unsealed only after the 1,250th valid,
+independently timestamped registered XNYS session has occurred **and the full
+subsequent 20-XNYS-session maturation period has elapsed**, subject to every
+other mandatory integrity and authorization condition. Reaching the 1,250th
+valid registration alone never permits unsealing. Because activation has not
+occurred, an exact calendar unseal date does not yet exist and must not be
+invented. No outcome-conditioned metric may be viewed before authorized
+unsealing.
 
 Phase 4B historical work is isolated from the registry and cannot populate,
 revise, or inspect the prospective holdout.
@@ -844,7 +858,9 @@ by this document.
   without replacement by stable `security_id`;
 - retention of every invariant-valid seed experiencing legitimate scarcity;
 - 1,000 attempted seeds, minimum 800 invariant-valid controls, non-circular
-  deterministic PCG64DXSM derivation, and complete audit trail;
+  deterministic PCG64DXSM derivation, explicit validity/failure status for every
+  attempt, and primary scarcity statistics restricted to invariant-valid
+  controls;
 - mean scarcity rate with a strict `> 1%` REVIEW-only GO cap;
 - CAGR-minus-median-control economic endpoint and +2-pp materiality threshold;
 - mean-individual-control-log-growth estimand, registered stationary bootstrap,
@@ -855,7 +871,9 @@ by this document.
 - removal of all secondary financial no-go safeguards and unapproved absolute
   concentration, beta, alpha, and path thresholds;
 - separation of historical robustness from prospective validation; and
-- prospective registration/holdout rules and two separate technical preflights.
+- prospective registration/holdout rules, including the full 20-session
+  maturation period after the 1,250th valid registration, and two separate
+  technical preflights.
 
 ### B. Frozen historical facts and limitations
 
